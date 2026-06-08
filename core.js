@@ -2,9 +2,21 @@
 (function (root) {
   'use strict';
 
-  var SCHEMA_VERSION = 10;
+  var SCHEMA_VERSION = 12;
 
   function defaultPer(type) { return type === '住宿' ? 'shared' : 'person'; }
+
+  // 由帶 amount/low/high 的物件取單一金額：有 amount 直用，否則由 low/high 推中位數（只有一邊則用那邊）
+  function midOf(o) {
+    if (!o || typeof o !== 'object') return null;
+    if (typeof o.amount === 'number') return o.amount;
+    var l = (typeof o.low === 'number') ? o.low : null;
+    var h = (typeof o.high === 'number') ? o.high : null;
+    if (l == null && h == null) return null;
+    if (l == null) return h;
+    if (h == null) return l;
+    return Math.round((l + h) / 2);
+  }
 
   function normalizePlace(p) {
     p = p || {};
@@ -14,6 +26,7 @@
       id: p.id,
       name: p.name || '未命名地點',
       en: p.en || '',
+      icon: p.icon || '',
       type: type,
       area: p.area || '其他',
       lat: (typeof p.lat === 'number') ? p.lat : null,
@@ -21,11 +34,23 @@
       hours: p.hours || '',
       price: p.price || '',
       note: p.note || '',
+      tentative: p.tentative === true,
       cost: {
-        low: (typeof cost.low === 'number') ? cost.low : null,
-        high: (typeof cost.high === 'number') ? cost.high : null,
+        amount: midOf(cost),
         per: (cost.per === 'shared' || cost.per === 'person') ? cost.per : defaultPer(type)
       }
+    };
+  }
+
+  function migManual(m) {
+    if (!m) return null;
+    return {
+      id: m.id,
+      label: m.label,
+      type: m.type || '其他',
+      per: (m.per === 'shared') ? 'shared' : 'person',
+      qty: (typeof m.qty === 'number' && m.qty > 0) ? m.qty : 1,
+      amount: midOf(m)
     };
   }
 
@@ -35,7 +60,7 @@
       schemaVersion: SCHEMA_VERSION,
       places: Array.isArray(db.places) ? db.places.slice() : [],
       plan: [],
-      manualLines: Array.isArray(db.manualLines) ? db.manualLines.slice() : [],
+      manualLines: (Array.isArray(db.manualLines) ? db.manualLines : []).map(migManual).filter(Boolean),
       settings: (db.settings && typeof db.settings === 'object') ? Object.assign({}, db.settings) : {},
       typeIcons: db.typeIcons || {},
       typeColors: db.typeColors || {}
@@ -62,34 +87,13 @@
     return out;
   }
 
-  function coerceRange(low, high) {
-    var l = (typeof low === 'number') ? low : null;
-    var h = (typeof high === 'number') ? high : null;
-    if (l == null && h == null) return null;
-    if (l == null) l = h;
-    if (h == null) h = l;
-    return { low: l, high: h };
-  }
-
-  function sumRanges(items) {
-    var low = 0, high = 0;
-    (items || []).forEach(function (r) {
-      if (!r) return;
-      low += (typeof r.low === 'number') ? r.low : 0;
-      high += (typeof r.high === 'number') ? r.high : 0;
-    });
-    return { low: low, high: high };
-  }
-
-  function expandForScope(range, per, people, scope) {
+  function expandForScope(amount, per, people, scope) {
     people = (typeof people === 'number' && people > 0) ? people : 2;
+    var a = (typeof amount === 'number') ? amount : 0;
     var f;
     if (per === 'shared') f = (scope === 'perPerson') ? (1 / people) : 1;
     else f = (scope === 'perPerson') ? 1 : people;
-    return {
-      low: (range && typeof range.low === 'number' ? range.low : 0) * f,
-      high: (range && typeof range.high === 'number' ? range.high : 0) * f
-    };
+    return a * f;
   }
 
   function occurrenceContribs(plan, places) {
@@ -98,13 +102,11 @@
     var out = [];
     (plan || []).forEach(function (e) {
       var p = byId[e.placeId];
-      if (!p || !p.cost) return;
-      var r = coerceRange(p.cost.low, p.cost.high);
-      if (!r) return;
+      if (!p || !p.cost || typeof p.cost.amount !== 'number') return;
       out.push({
         type: p.type || '其他',
         per: (p.cost.per === 'shared' ? 'shared' : 'person'),
-        range: r, label: p.name, day: e.day, slot: e.slot, placeId: p.id
+        amount: p.cost.amount, label: p.name, day: e.day, slot: e.slot, placeId: p.id
       });
     });
     return out;
@@ -113,13 +115,12 @@
   function manualContribs(manualLines) {
     var out = [];
     (manualLines || []).forEach(function (m) {
+      if (typeof m.amount !== 'number') return;
       var qty = (typeof m.qty === 'number' && m.qty > 0) ? m.qty : 1;
-      var r = coerceRange(m.low, m.high);
-      if (!r) return;
       out.push({
         type: m.type || '其他',
         per: (m.per === 'shared' ? 'shared' : 'person'),
-        range: { low: r.low * qty, high: r.high * qty },
+        amount: m.amount * qty,
         label: m.label || '手動花費', qty: qty, manualId: m.id
       });
     });
@@ -133,26 +134,20 @@
     var contribs = occurrenceContribs(plan, places).concat(manualContribs(manualLines));
     var byType = {};
     TYPES_ORDER.forEach(function (t) {
-      byType[t] = { trip:{low:0,high:0}, perPerson:{low:0,high:0}, items: [] };
+      byType[t] = { trip:0, perPerson:0, items: [] };
     });
     contribs.forEach(function (c) {
       var t = byType[c.type] ? c.type : '其他';
-      var trip = expandForScope(c.range, c.per, people, 'trip');
-      var pp = expandForScope(c.range, c.per, people, 'perPerson');
-      byType[t].trip.low += trip.low;   byType[t].trip.high += trip.high;
-      byType[t].perPerson.low += pp.low; byType[t].perPerson.high += pp.high;
+      byType[t].trip += expandForScope(c.amount, c.per, people, 'trip');
+      byType[t].perPerson += expandForScope(c.amount, c.per, people, 'perPerson');
       byType[t].items.push(c);
     });
-    var total = { trip:{low:0,high:0}, perPerson:{low:0,high:0} };
+    var total = { trip:0, perPerson:0 };
     TYPES_ORDER.forEach(function (t) {
-      total.trip.low += byType[t].trip.low;   total.trip.high += byType[t].trip.high;
-      total.perPerson.low += byType[t].perPerson.low; total.perPerson.high += byType[t].perPerson.high;
+      total.trip += byType[t].trip;
+      total.perPerson += byType[t].perPerson;
     });
-    var median = {
-      trip: (total.trip.low + total.trip.high) / 2,
-      perPerson: (total.perPerson.low + total.perPerson.high) / 2
-    };
-    return { byType: byType, total: total, median: median, people: people, order: TYPES_ORDER.slice() };
+    return { byType: byType, total: total, people: people, order: TYPES_ORDER.slice() };
   }
 
   function scheduledPlaceIds(plan) {
@@ -221,7 +216,7 @@
     return migrate(merged);
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, defaultPer: defaultPer, normalizePlace: normalizePlace, migrate: migrate, coerceRange: coerceRange, sumRanges: sumRanges, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeDb: mergeDb };
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, defaultPer: defaultPer, normalizePlace: normalizePlace, migrate: migrate, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeDb: mergeDb };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;

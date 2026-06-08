@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>清邁行程 · 互動原型 v9</title>
+<title>清邁・2026 夏</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐘</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="core.js"></script>
-<script src="sync.js"></script>
+<script src="core.js?v=12"></script>
+<script src="sync.js?v=12"></script>
 <style>
   :root{ --bg:#f4f1ea; --card:#fff; --ink:#2e2a24; --muted:#8a8276; --line:#e7e0d2; --daycol:128px; --slcol:46px; }
   *{box-sizing:border-box}
@@ -29,11 +30,15 @@
   .pm{flex:1 1 0;min-width:300px;position:sticky;top:46px;background:var(--bg);z-index:50;}
   .mxcol{flex:0 1 auto;width:862px;min-width:0;}
   #mapview{height:72vh;min-height:300px;border-radius:12px;}
+  #maptoggle{display:none;}
   @media(max-width:980px){
     .plangrid{flex-direction:column;align-items:stretch;}
     .pm{position:sticky;top:46px;width:100%;background:var(--bg);z-index:50;padding-bottom:6px;box-shadow:0 6px 8px -6px rgba(0,0,0,.18);}
     .mxcol{width:100%;}
     #mapview{height:34vh;min-height:200px;}
+    #maptoggle{display:block;width:100%;border:0;background:#ece6da;color:#6b6356;font-size:12px;padding:7px;border-radius:8px;margin-bottom:6px;cursor:pointer;font-family:inherit;}
+    body.map-collapsed #mapview,body.map-collapsed #mapdaywrap,body.map-collapsed #maplegend{display:none;}
+    body.map-collapsed .pm{box-shadow:none;padding-bottom:0;}
   }
   .leaflet-popup-content{font-size:13px;line-height:1.55;}
   .poparm{display:inline-block;margin-top:7px;background:#e8a13a;color:#fff;padding:5px 10px;border-radius:7px;cursor:pointer;font-weight:600;}
@@ -99,6 +104,8 @@
   .meta{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7;}
   .meta .k{color:#b1a896;}
   .sched{font-size:10px;color:#5a7a3a;background:#eef5e8;border-radius:6px;padding:1px 6px;display:inline-block;margin-top:2px;}
+  .nolocate{font-size:11px;color:#a59c8b;margin-top:5px;}
+  .tentbadge{font-size:10px;background:#f0e2c8;color:#9c7016;padding:2px 7px;border-radius:9px;white-space:nowrap;}
   .pbtns{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;}
   .pbtn{font-size:11px;border:1px solid #d8d0c2;background:#fff;border-radius:7px;padding:5px 10px;cursor:pointer;color:#5a5246;text-decoration:none;}
   .pbtn.pri{background:#2e2a24;color:#fff;border-color:#2e2a24;}
@@ -106,7 +113,8 @@
 
   .overlay{position:fixed;inset:0;background:rgba(40,36,30,.45);z-index:1300;display:none;align-items:flex-end;justify-content:center;}
   .overlay.on{display:flex;}
-  .sheet{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:16px;max-height:86vh;overflow:auto;}
+  .sheet{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:16px;max-height:86vh;overflow:auto;position:relative;}
+  .sheetclose{position:absolute;top:12px;right:12px;border:1px solid #e0d8c8;background:#fff;color:#8a8276;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit;z-index:2;}
   @media(min-width:560px){ .overlay{align-items:center;} .sheet{border-radius:16px;} }
   .sheet h3{margin:0 0 4px;font-size:16px;}
   .sheet .subline{font-size:12px;color:var(--muted);margin-bottom:10px;}
@@ -117,6 +125,12 @@
   .sheet input,.sheet textarea,.sheet select{width:100%;border:1px solid #d8d0c2;border-radius:8px;padding:9px 11px;font-size:14px;margin-bottom:8px;font-family:inherit;background:#fff;}
   .iconrow{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
   .iconrow .nm{flex:1;font-size:14px;} .iconrow input.em{width:58px;text-align:center;font-size:20px;margin:0;} .iconrow input[type=color]{width:44px;height:38px;padding:2px;margin:0;}
+  .iconpickbtn{font-size:12px;border:1px solid #d8d0c2;background:#fff;color:#6b6356;border-radius:8px;padding:0 11px;cursor:pointer;white-space:nowrap;font-family:inherit;flex:none;}
+  .emojipanel{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:0 0 10px;max-height:240px;overflow:auto;background:#fbf9f4;-webkit-overflow-scrolling:touch;}
+  .emojicat{font-size:11px;color:#a59c8b;font-weight:600;margin:9px 0 4px;} .emojicat:first-child{margin-top:0;}
+  .emojigrid{display:flex;flex-wrap:wrap;gap:4px;}
+  .emojibtn{font-size:18px;line-height:1;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;user-select:none;}
+  .emojibtn:hover{background:#efe8da;} .emojibtn.dflt{font-size:11px;color:#8a8276;padding:5px 9px;}
   .sheet textarea.code{font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;min-height:180px;}
   .sheet .row{display:flex;gap:7px;flex-wrap:wrap;}
   .sheet .two{display:flex;gap:8px;} .sheet .two>div{flex:1;}
@@ -127,11 +141,11 @@
 </style>
 </head>
 <body>
-<header><h1>清邁共編行程 · 8/22–9/1</h1><span class="gear" data-action="settings">⚙ 設定</span></header>
+<header><h1>🐘 清邁・2026 夏</h1><span class="gear" data-action="settings">⚙ 設定</span></header>
 
 <div class="wrap">
   <div class="plangrid">
-    <div class="pm"><div id="mapview"></div><div id="mapdaywrap"></div><div id="maplegend"></div></div>
+    <div class="pm"><button id="maptoggle" data-action="maptoggle">▲ 收起地圖</button><div id="mapview"></div><div id="mapdaywrap"></div><div id="maplegend"></div></div>
     <div class="mxcol">
       <div class="rtabs">
         <span class="rtab active" data-action="rtab" data-r="ov">📋 10天總覽</span>
@@ -249,10 +263,11 @@ function save(){
 }
 function tcolor(t){ return typeColors[t]||(TYPES[t]||TYPES['其他']).c; }
 function temoji(t){ return typeIcons[t]||(TYPES[t]||TYPES['其他']).e; }
+function placeEmoji(p){ return (p&&p.icon)?p.icon:temoji(p.type); }
 function getPlace(id){ return places.find(p=>p.id===id); }
 function uid(){ return 'x'+(Math.round(performance.now()*1000)%1e9)+''+Math.round(performance.now()%997); }
 function makePlace(partial){ return CNXCore.normalizePlace(Object.assign({id:uid()},partial||{})); }
-function isPending(p){ return !(p&&p.lat&&p.lng); } // 待定＝尚未定位
+function notLocated(p){ return !(p&&p.lat&&p.lng); } // 沒座標、不在地圖上（僅顯示提示用）
 function gmaps(p){
   const term=(p.en&&/[a-zA-Z]/.test(p.en))?p.en:p.name;
   if(p.lat&&p.lng) return 'https://www.google.com/maps/search/'+encodeURIComponent(term)+'/@'+p.lat+','+p.lng+',17z';
@@ -292,8 +307,7 @@ function renderMatrixInto(id,days){
       const inner=entries.map(e=>{
         const p=getPlace(e.placeId); if(!p) return '';
         const cross=slot.kind!=='stay'&&p.type!=='其他'&&p.area&&p.area!=='其他'&&!ok.includes(p.area);
-        const pend=isPending(p)?' <span class="cx">待定</span>':'';
-        return `<div class="mi" data-action="occ" data-eid="${e.id}" style="border-left-color:${tcolor(p.type)}">${temoji(p.type)} ${esc(p.name)}${pend}${cross?' <span class="cx">跨</span>':''}</div>`;
+        return `<div class="mi" data-action="occ" data-eid="${e.id}" style="border-left-color:${tcolor(p.type)}">${placeEmoji(p)} ${esc(p.name)}${p.tentative?' <span class="cx">待定</span>':''}${cross?' <span class="cx">跨</span>':''}</div>`;
       }).join('');
       return `<td class="c ${STAY_CLASS[d.stay]}" data-action="cell" data-day="${d.id}" data-slot="${slot.key}">${inner||'<span class="cempty">＋</span>'}</td>`;
     }).join('')+'</tr>';
@@ -332,7 +346,7 @@ function renderMarkers(){
     if(mapDays.size===0) return true;
     return plan.some(e=>e.placeId===p.id&&mapDays.has(e.day));
   }).forEach(p=>{
-    const icon=L.divIcon({className:'',html:`<div class="maplabel" style="border-left-color:${tcolor(p.type)}">${temoji(p.type)} ${esc(p.name)}</div>`,iconSize:[null,null],iconAnchor:[0,9]});
+    const icon=L.divIcon({className:'',html:`<div class="maplabel" style="border-left-color:${tcolor(p.type)}">${placeEmoji(p)} ${esc(p.name)}</div>`,iconSize:[null,null],iconAnchor:[0,9]});
     const m=L.marker([p.lat,p.lng],{icon,riseOnHover:true}).addTo(map);
     const sc=placeSched(p.id);
     m.bindPopup(`<b>${esc(p.name)}</b> <span style="color:#888">${esc(p.en||'')}</span><br>
@@ -355,11 +369,11 @@ function metaBlock(p){
   return `<div class="meta"><span class="k">🕑</span> ${esc(p.hours||'—')}　<span class="k">💵</span> ${esc(p.price||'—')}<br><span class="k">📝</span> ${esc(p.note||'—')}${sc.length?'<br><span class="sched">📅 '+sc.join('、')+'</span>':''}</div>`;
 }
 function cardHTML(p){
-  const pend=isPending(p);
+  const nolc=notLocated(p);
   return `<div class="place" style="border-left-color:${tcolor(p.type)}">
-    <div class="top"><div class="name">${temoji(p.type)} ${esc(p.name)} <span class="en">${esc(p.en||'')}</span>${pend?' <span style="font-size:10px;background:#f0e2c8;color:#9c7016;padding:2px 7px;border-radius:9px">待定</span>':''}</div>
+    <div class="top"><div class="name">${placeEmoji(p)} ${esc(p.name)} <span class="en">${esc(p.en||'')}</span>${p.tentative?' <span class="tentbadge">待定</span>':''}</div>
     <span class="area-chip" style="background:${acolor(p.area)}">${p.area}</span></div>
-    ${pend?'<div style="font-size:12px;color:#c0392b;margin-top:6px">⚠ 未定位 · 點編輯補店名/位置即轉正</div>':''}
+    ${nolc?'<div class="nolocate">未定位（不在地圖上）</div>':''}
     ${metaBlock(p)}
     <div class="pbtns">
       <span class="pbtn pri" data-action="arm" data-id="${p.id}">📅 排入行程</span>
@@ -386,28 +400,40 @@ function renderList(){
 }
 
 const ov=document.getElementById('overlay'),sh=document.getElementById('sheet');
-function openSheet(html){ sh.innerHTML=html; ov.classList.add('on'); }
+function openSheet(html){ sh.innerHTML='<button class="sheetclose" data-action="close">關閉</button>'+html; ov.classList.add('on'); }
 function closeSheet(){ ov.classList.remove('on'); }
 ov.addEventListener('click',e=>{ if(e.target===ov) closeSheet(); });
 const INTENTS=[{e:'💆',name:'按摩',type:'娛樂'},{e:'🍽️',name:'午餐',type:'食物'},{e:'🍽️',name:'晚餐',type:'食物'},{e:'☕',name:'咖啡/果汁',type:'食物'},{e:'🛍️',name:'逛逛',type:'逛街'}];
+// 卡片 icon 的 emoji 選單，依分類排列（收合、點才展開；不夠用可直接在欄位打字／用系統 emoji 鍵盤）
+const EMOJI_CATS=[
+  {label:'食物',emojis:['🍜','🍲','🍛','🥘','🍢','🍡','🥟','🍳','🌶️','🍤','🍗','🍖','🥩','🥗','🍚','🍙','🍱','🍝','🌯','🥪','🍔','🍟','🍕','🌭','🥞','🧇','🥨','🥐','🍞','🧀','🥚','🥓','🍣','🍥','🥠']},
+  {label:'甜點/水果',emojis:['🍦','🍧','🍨','🍩','🍪','🎂','🍰','🧁','🥧','🍮','🍯','🍫','🍬','🍭','🍓','🍉','🍊','🍋','🍌','🍍','🥭','🍑','🍒','🥥','🥝','🍅','🥑','🍇','🍈','🥕']},
+  {label:'飲料',emojis:['☕','🍵','🧋','🥤','🧃','🍹','🍸','🍺','🍻','🍷','🥂','🍶','🥃','🧉','🍾','🥛']},
+  {label:'景點/自然',emojis:['🛕','⛩️','🏯','🏰','🏛️','⛪','🕌','🗿','🌅','🌄','🏞️','🏔️','⛰️','🌋','🏖️','🏝️','🌳','🌲','🌴','🌵','🌸','🌺','🌻','🌷','🍀','🍁','🐘','🐅','🦋','🐢','🐠','🐬','🦜','♨️','💦','🌊']},
+  {label:'活動/娛樂',emojis:['💆','🧖','💅','🛀','🎉','🎊','🎭','🎨','🖼️','🎵','🎶','🎤','🎸','🥁','🎮','🎡','🎢','🎠','🛶','🚣','🏊','🚴','🥾','🧘','📷','📸','🎬','🎫','🎯']},
+  {label:'購物',emojis:['🛍️','🛒','🏪','🏬','🧺','🎁','👗','👚','👕','👖','👜','👠','👟','💄','💍','💎','🧵','🧶','🕶️','🧢','🌂']},
+  {label:'住宿',emojis:['🏨','🏩','🛏️','🛌','🏡','🏠','🏚️','⛺','🏕️','🛖','🗝️']},
+  {label:'交通',emojis:['✈️','🛫','🛬','🚕','🚗','🚙','🛵','🏍️','🚌','🚎','🚐','🚉','🚆','🚊','🚲','⛴️','🚤','🛺','🗺️','📍','🧭','🛟']},
+  {label:'符號/其他',emojis:['⭐','🌟','✨','❤️','🧡','💛','💚','💙','💜','🔥','💧','☀️','🌙','⛅','☔','❄️','✅','❗','❓','💡','📝','📌','🔖','🏆','🥇','💵','💰','🧳','🕐','🌈']}
+];
 
 function openAdd(day,slotKey){
   const d=DAYS.find(x=>x.id===day),s=slotObj(slotKey),pool=places.slice().sort((a,b)=>Object.keys(TYPES).indexOf(a.type)-Object.keys(TYPES).indexOf(b.type));
-  let h=`<h3>${d.label}（${d.wd}）· ${s.label}${s.ctx?'·'+s.ctx:''}</h3><div class="sd">挑一個放進這格（同一張卡也可放多格＝回訪）</div>`;
+  let h=`<h3>${d.label}（${d.wd}）· ${s.label}${s.ctx?'·'+s.ctx:''}</h3><div class="sd">挑現有卡片，或新增一張（會開卡片讓你填基本資料，存檔後自動排進這格）</div>`;
   h+=`<div class="seclabel">🔍 從想去清單挑</div>`;
-  h+=pool.map(p=>`<div class="opt" data-action="pick" data-id="${p.id}" data-day="${day}" data-slot="${slotKey}"><span class="d" style="background:${tcolor(p.type)}"></span>${temoji(p.type)} ${esc(p.name)} <span style="color:#aaa;font-size:11px;margin-left:auto">${p.area}</span></div>`).join('');
-  h+=`<div class="seclabel">⏳ 先佔位（待定）</div>`;
-  h+=INTENTS.map(it=>`<div class="opt" data-action="intent" data-name="${it.name}" data-type="${it.type}" data-day="${day}" data-slot="${slotKey}"><span class="d" style="background:${tcolor(it.type)}"></span>${it.e} 先放「${it.name}」</div>`).join('');
-  h+=`<div class="seclabel">✏️ 自己打一個（待定）</div><input id="customname" placeholder="例如：某家想試的店"><div class="row"><span class="pill pri" data-action="custom" data-day="${day}" data-slot="${slotKey}">加入待定</span><span class="pill" data-action="close">取消</span></div>`;
+  h+=pool.map(p=>`<div class="opt" data-action="pick" data-id="${p.id}" data-day="${day}" data-slot="${slotKey}"><span class="d" style="background:${tcolor(p.type)}"></span>${placeEmoji(p)} ${esc(p.name)} <span style="color:#aaa;font-size:11px;margin-left:auto">${p.area}</span></div>`).join('');
+  h+=`<div class="seclabel">➕ 新增到這格（開卡片填資料）</div>`;
+  h+=INTENTS.map(it=>`<div class="opt" data-action="intent" data-name="${it.name}" data-type="${it.type}" data-day="${day}" data-slot="${slotKey}"><span class="d" style="background:${tcolor(it.type)}"></span>${it.e} ${esc(it.name)} <span style="color:#aaa;font-size:11px;margin-left:auto">開卡片 ›</span></div>`).join('');
+  h+=`<input id="customname" placeholder="或自己打店名…"><div class="row"><span class="pill pri" data-action="newfull" data-day="${day}" data-slot="${slotKey}">填完整卡片 ›</span><span class="pill" data-action="close">取消</span></div>`;
   openSheet(h);
 }
 function detailSheet(p,extraTopBtns){
   const sc=placeSched(p.id);
-  let h=`<h3>${temoji(p.type)} ${esc(p.name)}</h3><div class="subline">${esc(p.en||'')}</div>`;
+  let h=`<h3>${placeEmoji(p)} ${esc(p.name)}${p.tentative?' <span class="tentbadge">待定</span>':''}</h3><div class="subline">${esc(p.en||'')}</div>`;
   h+=`<div class="meta" style="margin-top:0"><span class="area-chip" style="background:${acolor(p.area)}">${p.area}</span> <span class="k">類型</span> ${p.type}<br>
     <span class="k">🕑</span> ${esc(p.hours||'—')}　<span class="k">💵</span> ${esc(p.price||'—')}<br>
     <span class="k">📝</span> ${esc(p.note||'—')}${sc.length?'<br><span class="sched">📅 已排：'+sc.join('、')+'</span>':''}
-    ${!(p.lat&&p.lng)?'<br><span style="color:#c08">⚠ 尚未定位（不在地圖上）</span>':''}</div>`;
+    ${notLocated(p)?'<br><span class="nolocate">未定位（不在地圖上）</span>':''}</div>`;
   h+=`<div class="row" style="margin-top:12px">${extraTopBtns||''}
     <a class="pill" href="${gmaps(p)}" target="_blank" rel="noopener">🗺️ Google Maps</a>
     <span class="pill" data-action="arm" data-id="${p.id}">📅 排入行程</span>
@@ -422,22 +448,31 @@ function openOcc(eid){
   h+=`<div class="sd" style="margin-top:10px">此筆在 <b>${where}</b></div><div class="row"><span class="pill danger" data-action="occ-remove" data-eid="${eid}">移除這筆</span><span class="pill" data-action="close">關閉</span></div>`;
   openSheet(h);
 }
-function openEdit(id){
-  const isNew=!id; const p=isNew?CNXCore.normalizePlace({type:'其他'}):getPlace(id);
+let pendingAddTarget=null; // 從行程格新增時記住 {day,slot}；存檔後排入並清掉
+function openEdit(id, addTarget, prefill){
+  pendingAddTarget = addTarget || null; prefill = prefill || {};
+  const isNew=!id; const p=isNew?CNXCore.normalizePlace({type:prefill.type||'其他'}):getPlace(id);
+  const nameVal=isNew?(prefill.name||''):p.name;
+  const tentVal=isNew?(prefill.tentative===true):!!p.tentative;
   let h=`<h3>${isNew?'新增地點':'編輯卡片'}</h3><div class="sd">固定欄位用下拉、其他用打的，全部非必填。存檔後自動嘗試定位；查不到可手動標。</div>
-  <div class="seclabel">名稱</div><input id="ed_name" value="${esc(p.name)}" placeholder="地點／店名">
+  <div class="seclabel">名稱與圖示</div>
+  <div class="iconrow"><input class="em" id="ed_icon" value="${esc(p.icon||'')}" placeholder="${esc(temoji(p.type))}"><input id="ed_name" style="flex:1;margin:0" value="${esc(nameVal)}" placeholder="地點／店名"><button type="button" class="iconpickbtn" data-action="toggle-emoji">選 emoji ▾</button></div>
+  <div id="emojiPanel" class="emojipanel" style="display:none"><div class="emojigrid" style="margin-bottom:2px"><span class="emojibtn dflt" data-action="pick-emoji" data-emoji="">↺ 用類別預設</span></div>${EMOJI_CATS.map(c=>`<div class="emojicat">${c.label}</div><div class="emojigrid">${c.emojis.map(em=>`<span class="emojibtn" data-action="pick-emoji" data-emoji="${em}">${em}</span>`).join('')}</div>`).join('')}</div>
   <div class="two"><div><div class="seclabel">類型</div><select id="ed_type">${Object.keys(TYPES).map(t=>`<option ${t===p.type?'selected':''}>${t}</option>`).join('')}</select></div>
   <div><div class="seclabel">區域</div><select id="ed_area">${Object.keys(AREAS).map(x=>`<option ${x===p.area?'selected':''}>${x}</option>`).join('')}</select></div></div>
+  <div class="seclabel">狀態</div>
+  <div class="row" style="margin-bottom:8px"><span class="chip ${!tentVal?'on':''}" data-action="ed-status" data-tent="0">確定</span><span class="chip ${tentVal?'on':''}" data-action="ed-status" data-tent="1">待定</span></div>
   <div class="seclabel">英文／別名（有填定位與連結更準）</div><input id="ed_en" value="${esc(p.en||'')}" placeholder="例如 Rustic Market">
   <div class="two"><div><div class="seclabel">營業時間</div><input id="ed_hours" value="${esc(p.hours||'')}" placeholder="選填"></div>
   <div><div class="seclabel">價位（單品行情備註）</div><input id="ed_price" value="${esc(p.price||'')}" placeholder="例如 豬腳飯 30–40"></div></div>
   <div class="seclabel">備註</div><textarea id="ed_note" rows="2" placeholder="選填">${esc(p.note||'')}</textarea>
-  <div class="seclabel">花費估算（NT$／每次排入）</div>
-  <div class="two"><div><input id="ed_low" inputmode="numeric" value="${p.cost&&p.cost.low!=null?p.cost.low:''}" placeholder="省錢 低標"></div>
-  <div><input id="ed_high" inputmode="numeric" value="${p.cost&&p.cost.high!=null?p.cost.high:''}" placeholder="貴貴 高標"></div></div>
+  <div class="seclabel">預估花費（NT$／每次排入）</div>
+  <input id="ed_amount" inputmode="numeric" value="${p.cost&&p.cost.amount!=null?p.cost.amount:''}" placeholder="例如 350">
   <div class="row" style="margin-bottom:8px"><span class="chip ${(!p.cost||p.cost.per!=='shared')?'on':''}" data-action="ed-per" data-per="person">每人</span><span class="chip ${(p.cost&&p.cost.per==='shared')?'on':''}" data-action="ed-per" data-per="shared">共用（房/車）</span></div>
-  <div class="row" style="margin-top:6px"><span class="pill pri" data-action="save-edit" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span>${isNew?'':`<span class="pill" data-action="geo" data-id="${id}">🔍 自動定位</span><span class="pill" data-action="pinmode" data-id="${id}">📍 在地圖點選位置</span><span class="pill danger" data-action="del-card" data-id="${id}">刪除</span>`}<span class="pill" data-action="close">取消</span></div>`;
-  openSheet(h); sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person';
+  <div class="row" style="margin-top:6px"><span class="pill pri" data-action="save-edit" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span><span class="pill" data-action="close">取消</span></div>
+  ${isNew?'':`<div class="seclabel">定位</div><div class="row"><span class="pill" data-action="geo" data-id="${id}">🔍 自動定位</span><span class="pill" data-action="pinmode" data-id="${id}">📍 在地圖點選位置</span></div>
+  <div class="row" style="margin-top:14px;justify-content:flex-end"><span class="pill danger" data-action="del-card" data-id="${id}">刪除卡片</span></div>`}`;
+  openSheet(h); sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tentative=tentVal?'1':'';
 }
 function openIcons(){
   const ks=Object.keys(TYPES);
@@ -460,7 +495,7 @@ document.addEventListener('click',e=>{
   const t=e.target.closest('[data-action]'); if(!t) return;
   const a=t.dataset.action;
   if(a==='rtab'){ switchRight(t.dataset.r); return; }
-  if(a==='bver'){ budgetVer=t.dataset.v; renderBudget(); return; }
+  if(a==='maptoggle'){ const c=document.body.classList.toggle('map-collapsed'); t.textContent=c?'▼ 展開地圖':'▲ 收起地圖'; if(!c&&map) setTimeout(()=>map.invalidateSize(),50); return; }
   if(a==='btoggle'){ const ty=t.dataset.type; budgetOpen.has(ty)?budgetOpen.delete(ty):budgetOpen.add(ty); renderBudget(); return; }
   if(a==='ml-add'){ openManualLine(null); return; }
   if(a==='ml-edit'){ openManualLine(t.dataset.id); return; }
@@ -468,7 +503,7 @@ document.addEventListener('click',e=>{
   if(a==='ml-save'){
     const v=id=>document.getElementById(id).value.trim();
     const numOrNull=s=>{ s=(s||'').trim(); if(s==='')return null; const n=parseFloat(s); return isNaN(n)?null:n; };
-    const qn=parseFloat(v('ml_qty')); const obj={label:v('ml_label')||'手動花費',type:document.getElementById('ml_type').value,low:numOrNull(v('ml_low')),high:numOrNull(v('ml_high')),per:sh.dataset.mlper==='shared'?'shared':'person',qty:(isNaN(qn)||qn<1)?1:qn};
+    const qn=parseFloat(v('ml_qty')); const obj={label:v('ml_label')||'手動花費',type:document.getElementById('ml_type').value,amount:numOrNull(v('ml_amount')),per:sh.dataset.mlper==='shared'?'shared':'person',qty:(isNaN(qn)||qn<1)?1:qn};
     if(t.dataset.id==='__new__'){ obj.id=uid(); manualLines.push(obj); } else { const m=manualLines.find(x=>x.id===t.dataset.id); if(m) Object.assign(m,obj); }
     afterChange(); closeSheet(); return; }
   if(a==='ml-del'){ manualLines=manualLines.filter(x=>x.id!==t.dataset.id); afterChange(); closeSheet(); return; }
@@ -485,13 +520,16 @@ document.addEventListener('click',e=>{
     else { mapSched=false; mapDays.has(dy)?mapDays.delete(dy):mapDays.add(dy); }
     renderMapDayFilter(); renderMarkers(); return; }
   if(a==='pick'){ plan.push({id:uid(),placeId:t.dataset.id,day:t.dataset.day,slot:t.dataset.slot}); afterChange(); closeSheet(); return; }
-  if(a==='intent'){ const np=makePlace({name:t.dataset.name,type:t.dataset.type}); places.push(np); plan.push({id:uid(),placeId:np.id,day:t.dataset.day,slot:t.dataset.slot}); afterChange(); closeSheet(); return; }
-  if(a==='custom'){ const n=document.getElementById('customname').value.trim(); if(!n) return; const np=makePlace({name:n,type:'其他'}); places.push(np); plan.push({id:uid(),placeId:np.id,day:t.dataset.day,slot:t.dataset.slot}); afterChange(); closeSheet(); return; }
+  if(a==='intent'){ openEdit(null,{day:t.dataset.day,slot:t.dataset.slot},{name:t.dataset.name,type:t.dataset.type,tentative:true}); return; }
+  if(a==='newfull'){ const n=document.getElementById('customname').value.trim(); openEdit(null,{day:t.dataset.day,slot:t.dataset.slot},{name:n}); return; }
   if(a==='occ-remove'){ plan=plan.filter(x=>x.id!==t.dataset.eid); afterChange(); closeSheet(); return; }
   if(a==='occ-move'){ const en=plan.find(x=>x.id===t.dataset.eid); const pid=en.placeId; plan=plan.filter(x=>x.id!==t.dataset.eid); afterChange(); closeSheet(); if(pid) arm(pid); return; }
   if(a==='edit'){ openEdit(t.dataset.id); return; }
   if(a==='newcard'){ openEdit(null); return; }
   if(a==='ed-per'){ sh.querySelectorAll('[data-action="ed-per"]').forEach(x=>x.classList.toggle('on',x===t)); sh.dataset.per=t.dataset.per; return; }
+  if(a==='ed-status'){ sh.querySelectorAll('[data-action="ed-status"]').forEach(x=>x.classList.toggle('on',x===t)); sh.dataset.tentative=t.dataset.tent==='1'?'1':''; return; }
+  if(a==='toggle-emoji'){ const pn=document.getElementById('emojiPanel'); if(pn){ const open=pn.style.display==='none'; pn.style.display=open?'block':'none'; t.textContent=open?'選 emoji ▴':'選 emoji ▾'; } return; }
+  if(a==='pick-emoji'){ const el=document.getElementById('ed_icon'); if(el) el.value=t.dataset.emoji; const pn=document.getElementById('emojiPanel'); if(pn) pn.style.display='none'; const tb=sh.querySelector('[data-action="toggle-emoji"]'); if(tb) tb.textContent='選 emoji ▾'; return; }
   if(a==='icons'){ openIcons(); return; }
   if(a==='impexp'){ openImpExp(); return; }
   if(a==='copy-link'){ copySyncLink(); return; }
@@ -503,9 +541,10 @@ document.addEventListener('click',e=>{
   if(a==='save-edit'){
     const v=id=>document.getElementById(id).value.trim();
     const numOrNull=s=>{ s=(s||'').trim(); if(s==='')return null; const n=parseFloat(s); return isNaN(n)?null:n; };
-    const cost={low:numOrNull(v('ed_low')),high:numOrNull(v('ed_high')),per:sh.dataset.per==='shared'?'shared':'person'};
-    if(t.dataset.id==='__new__'){ const np=makePlace({name:v('ed_name')||'未命名地點',en:v('ed_en'),type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),price:v('ed_price'),note:v('ed_note'),cost}); places.push(np); afterChange(); closeSheet(); geocode(np); }
-    else { const p=getPlace(t.dataset.id); const oldName=p.name,oldEn=p.en; p.name=v('ed_name')||p.name; p.en=v('ed_en'); p.type=document.getElementById('ed_type').value; p.area=document.getElementById('ed_area').value; p.hours=v('ed_hours'); p.price=v('ed_price'); p.note=v('ed_note'); p.cost=cost; afterChange(); closeSheet(); if(!p.lat||p.name!==oldName||p.en!==oldEn) geocode(p); }
+    const cost={amount:numOrNull(v('ed_amount')),per:sh.dataset.per==='shared'?'shared':'person'};
+    const icon=v('ed_icon'); const tentative=sh.dataset.tentative==='1';
+    if(t.dataset.id==='__new__'){ const np=makePlace({name:v('ed_name')||'未命名地點',en:v('ed_en'),icon,tentative,type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),price:v('ed_price'),note:v('ed_note'),cost}); places.push(np); if(pendingAddTarget){ plan.push({id:uid(),placeId:np.id,day:pendingAddTarget.day,slot:pendingAddTarget.slot}); pendingAddTarget=null; } afterChange(); closeSheet(); geocode(np); }
+    else { const p=getPlace(t.dataset.id); const oldName=p.name,oldEn=p.en; p.name=v('ed_name')||p.name; p.en=v('ed_en'); p.icon=icon; p.tentative=tentative; p.type=document.getElementById('ed_type').value; p.area=document.getElementById('ed_area').value; p.hours=v('ed_hours'); p.price=v('ed_price'); p.note=v('ed_note'); p.cost=cost; afterChange(); closeSheet(); if(!p.lat||p.name!==oldName||p.en!==oldEn) geocode(p); }
     return; }
   if(a==='del-card'){ if(confirm('刪除這張卡片？（已排的也會一起移除）')){ plan=plan.filter(x=>x.placeId!==t.dataset.id); places=places.filter(x=>x.id!==t.dataset.id); afterChange(); closeSheet(); } return; }
   if(a==='ftype'){ const tp=t.dataset.type; if(tp==='__all'){fTypes.clear();} else { fTypes.has(tp)?fTypes.delete(tp):fTypes.add(tp); } renderFilters(); renderList(); return; }
@@ -530,37 +569,31 @@ async function importJSON(text){
   toast(`匯入完成：新增 ${added}、更新 ${updated}${need.length?'，自動定位中…':''}`);
   for(const p of need){ await geocode(p); }  // 沒座標的自動上地圖
 }
-let budgetVer='mid'; // 'low'|'mid'|'high'
 const budgetOpen=new Set();
 function nt(n){ return 'NT$ '+Math.round(n).toLocaleString('en-US'); }
 function renderBudget(){
   const el=document.getElementById('rbudget'); if(!el) return;
   const b=CNXCore.rollupBudget(plan,places,manualLines,settings);
-  const verVal=scope=> budgetVer==='low'?b.total[scope].low : budgetVer==='high'?b.total[scope].high : b.median[scope];
-  const verLabel= budgetVer==='low'?'省錢版' : budgetVer==='high'?'貴貴版' : '中位估';
-  const big=(label,scope)=>`<div style="flex:1;min-width:150px;background:#fff;border-radius:12px;padding:12px 14px;box-shadow:inset 0 0 0 1px var(--line)">
+  const big=(label,val)=>`<div style="flex:1;min-width:150px;background:#fff;border-radius:12px;padding:12px 14px;box-shadow:inset 0 0 0 1px var(--line)">
     <div style="font-size:11px;color:#a59c8b;font-weight:600">${label}</div>
-    <div style="font-size:20px;font-weight:700;margin-top:3px">${nt(verVal(scope))}</div>
-    <div style="font-size:11px;color:#8a8276;margin-top:2px">${verLabel} · 範圍 ${nt(b.total[scope].low)}–${nt(b.total[scope].high)}</div></div>`;
-  let h=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">${big('每人（含機票）','perPerson')}${big('全程 '+b.people+' 人','trip')}</div>`;
-  h+=`<div style="display:flex;gap:6px;margin-bottom:12px;align-items:center"><span class="flabel">看</span>
-    <span class="chip ${budgetVer==='low'?'on':''}" data-action="bver" data-v="low">省錢版</span>
-    <span class="chip ${budgetVer==='mid'?'on':''}" data-action="bver" data-v="mid">中位</span>
-    <span class="chip ${budgetVer==='high'?'on':''}" data-action="bver" data-v="high">貴貴版</span></div>`;
+    <div style="font-size:20px;font-weight:700;margin-top:3px">${nt(val)}</div></div>`;
+  let h=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${big('每人（含機票）',b.total.perPerson)}${big('全程 '+b.people+' 人',b.total.trip)}</div>`;
   h+=`<div style="background:#fff;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line);overflow:hidden">
-    <div style="display:flex;font-size:11px;color:#a59c8b;font-weight:600;padding:8px 12px;border-bottom:1px solid #f0ebe0"><span style="flex:1">類別（點開看細項）</span><span style="width:110px;text-align:right">省錢</span><span style="width:110px;text-align:right">貴貴</span></div>`;
+    <div style="display:flex;font-size:11px;color:#a59c8b;font-weight:600;padding:8px 12px;border-bottom:1px solid #f0ebe0"><span style="flex:1">類別（點開看細項）</span><span style="width:100px;text-align:right">總額</span><span style="width:100px;text-align:right">每人</span></div>`;
   b.order.forEach(type=>{
     const row=b.byType[type]; const open=budgetOpen.has(type);
     h+=`<div style="border-bottom:1px solid #f6f2ea">
       <div data-action="btoggle" data-type="${type}" style="display:flex;font-size:13px;padding:9px 12px;cursor:pointer">
         <span style="flex:1">${open?'▾':'▸'} ${temoji(type)} ${type} <span style="font-size:10px;color:#b3a994">· ${row.items.length} 筆</span></span>
-        <span style="width:110px;text-align:right">${nt(row.trip.low)}</span><span style="width:110px;text-align:right">${nt(row.trip.high)}</span></div>`;
+        <span style="width:100px;text-align:right">${nt(row.trip)}</span><span style="width:100px;text-align:right">${nt(row.perPerson)}</span></div>`;
     if(open){
       h+=`<div style="padding:0 12px 8px">`;
       if(!row.items.length) h+=`<div style="font-size:11px;color:#b3a994;padding:3px 0 6px">（這類還沒有花費，去卡片填估價或加手動花費）</div>`;
       row.items.forEach(it=>{
         const ctx=it.day?((DAYS.find(d=>d.id===it.day)||{}).label+' '+slotObj(it.slot).label):(it.qty>1?'×'+it.qty:'手動');
-        h+=`<div style="display:flex;font-size:12px;color:#6b6356;padding:3px 0;border-left:2px solid #f0e2c8;padding-left:8px"><span style="flex:1">${esc(it.label)} <span style="color:#b3a994">${esc(ctx)}</span></span><span style="width:90px;text-align:right">${nt(it.range.low)}</span><span style="width:90px;text-align:right">${nt(it.range.high)}</span></div>`;
+        const tripV=CNXCore.expandForScope(it.amount,it.per,b.people,'trip');
+        const ppV=CNXCore.expandForScope(it.amount,it.per,b.people,'perPerson');
+        h+=`<div style="display:flex;font-size:12px;color:#6b6356;padding:3px 0;border-left:2px solid #f0e2c8;padding-left:8px"><span style="flex:1">${esc(it.label)} <span style="color:#b3a994">${esc(ctx)}</span></span><span style="width:80px;text-align:right">${nt(tripV)}</span><span style="width:80px;text-align:right">${nt(ppV)}</span></div>`;
       });
       h+=`</div>`;
     }
@@ -570,21 +603,20 @@ function renderBudget(){
   manualLines.forEach(m=>{
     h+=`<div style="display:flex;align-items:center;background:#fff;border-radius:9px;padding:8px 12px;box-shadow:inset 0 0 0 1px var(--line);font-size:13px;margin-bottom:6px">
       <span style="flex:1">${esc(m.label||'手動花費')} <span style="font-size:10px;color:#b3a994">· ${m.type||'其他'} · ${m.per==='shared'?'共用':'每人'}${m.qty>1?' · ×'+m.qty:''}</span></span>
-      <span style="color:#8a8276;margin-right:8px">${m.low!=null?nt(m.low):'—'}${m.high!=null&&m.high!==m.low?' – '+nt(m.high):''}</span>
+      <span style="color:#8a8276;margin-right:8px">${m.amount!=null?nt(m.amount):'—'}</span>
       <span class="tinytool" data-action="ml-edit" data-id="${m.id}">✎</span></div>`;
   });
   h+=`<span class="ghostbtn" data-action="ml-add">＋ 加一筆手動花費</span></div>`;
   el.innerHTML=h;
 }
 function openManualLine(id){
-  const m=id?manualLines.find(x=>x.id===id):{label:'',type:'其他',low:null,high:null,per:'person',qty:1};
+  const m=id?manualLines.find(x=>x.id===id):{label:'',type:'其他',amount:null,per:'person',qty:1};
   const isNew=!id;
   let h=`<h3>${isNew?'加一筆手動花費':'編輯手動花費'}</h3><div class="sd">沒有卡片的花費（機票/計程車/簽證/SIM/每日雜支…）。qty 是份數，例如每日雜支 ×10 天。</div>
   <div class="seclabel">名稱</div><input id="ml_label" value="${esc(m.label||'')}" placeholder="例如 計程車/Grab">
   <div class="two"><div><div class="seclabel">類別</div><select id="ml_type">${['食物','景點','娛樂','逛街','住宿','其他'].map(x=>`<option ${x===(m.type||'其他')?'selected':''}>${x}</option>`).join('')}</select></div>
   <div><div class="seclabel">份數 qty</div><input id="ml_qty" inputmode="numeric" value="${m.qty||1}"></div></div>
-  <div class="two"><div><div class="seclabel">省錢 低標</div><input id="ml_low" inputmode="numeric" value="${m.low!=null?m.low:''}"></div>
-  <div><div class="seclabel">貴貴 高標</div><input id="ml_high" inputmode="numeric" value="${m.high!=null?m.high:''}"></div></div>
+  <div class="seclabel">預估金額（單筆 NT$）</div><input id="ml_amount" inputmode="numeric" value="${m.amount!=null?m.amount:''}" placeholder="例如 13000">
   <div class="row" style="margin-bottom:8px"><span class="chip ${m.per!=='shared'?'on':''}" data-action="ml-per" data-per="person">每人</span><span class="chip ${m.per==='shared'?'on':''}" data-action="ml-per" data-per="shared">共用</span></div>
   <div class="row" style="margin-top:6px"><span class="pill pri" data-action="ml-save" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span>${isNew?'':`<span class="pill danger" data-action="ml-del" data-id="${id}">刪除</span>`}<span class="pill" data-action="close">取消</span></div>`;
   openSheet(h); sh.dataset.mlper=m.per==='shared'?'shared':'person';
