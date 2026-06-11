@@ -101,11 +101,14 @@
   .place .name{font-size:14px;font-weight:600;}
   .place .en{font-size:11px;color:var(--muted);font-weight:400;}
   .area-chip{font-size:10px;color:#fff;padding:2px 7px;border-radius:9px;white-space:nowrap;}
-  .meta{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7;}
+  .meta{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7;word-break:break-word;}
   .meta .k{color:#b1a896;}
   .sched{font-size:10px;color:#5a7a3a;background:#eef5e8;border-radius:6px;padding:1px 6px;display:inline-block;margin-top:2px;}
   .nolocate{font-size:11px;color:#a59c8b;margin-top:5px;}
   .tentbadge{font-size:10px;background:#f0e2c8;color:#9c7016;padding:2px 7px;border-radius:9px;white-space:nowrap;}
+  .tierbadge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:9px;white-space:nowrap;color:#fff;}
+  .tierbadge.t1{background:#c0392b;} .tierbadge.t2{background:#e08a2b;}
+  .tierbadge.t3{background:#3a7ca5;} .tierbadge.t4{background:#9b9b9b;}
   .pbtns{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;}
   .pbtn{font-size:11px;border:1px solid #d8d0c2;background:#fff;border-radius:7px;padding:5px 10px;cursor:pointer;color:#5a5246;text-decoration:none;}
   .pbtn.pri{background:#2e2a24;color:#fff;border-color:#2e2a24;}
@@ -163,6 +166,7 @@
       <div id="rlist" style="display:none">
         <div class="filterrow" id="typefilter"></div>
         <div class="filterrow" id="areafilter"></div>
+        <div class="filterrow" id="tierfilter"></div>
         <div id="listgrid"></div>
       </div>
       <div id="rbudget" style="display:none"></div>
@@ -179,7 +183,7 @@ const TYPES={
   '食物':{c:'#e8623a',e:'🍜'},'景點':{c:'#3a9aa0',e:'🛕'},'娛樂':{c:'#d98a2b',e:'🎉'},
   '逛街':{c:'#d4756b',e:'🛍️'},'住宿':{c:'#5a7fb0',e:'🏨'},'其他':{c:'#9b9b9b',e:'📍'}
 };
-const AREAS={'古城':'#e8a13a','北/東北':'#5a9367','尼曼/西':'#6a8caf','濱河/東':'#b07aa1','其他':'#9b9b9b'};
+const AREAS={'古城':'#e8a13a','北/東北':'#5a9367','尼曼/西':'#6a8caf','濱河/東':'#b07aa1','南郊':'#c98a4b','東郊':'#7a9b6a','其他':'#9b9b9b'};
 function acolor(a){return AREAS[a]||AREAS['其他'];}
 const STAY_CLASS={'古城內':'zold','尼曼':'znim','夜市區':'zmkt'};
 const STAY_OK={'古城內':['古城','濱河/東','北/東北'],'尼曼':['尼曼/西'],'夜市區':['古城','濱河/東','北/東北']};
@@ -316,7 +320,7 @@ function renderMatrixInto(id,days){
 }
 function renderMatrix(){ renderMatrixInto('matrixA',DAYS.slice(0,6)); renderMatrixInto('matrixB',DAYS.slice(6)); }
 
-let map,markers=[],mapTypes=new Set(),mapDays=new Set(),mapSched=false;
+let map,markers=[],mapDays=new Set(),mapSched=false;
 function initMap(){
   if(map){ setTimeout(()=>map.invalidateSize(),60); renderMarkers(); return; }
   map=L.map('mapview').setView([18.79,98.985],13);
@@ -333,15 +337,15 @@ function renderMapDayFilter(){
 }
 function renderLegend(){
   document.getElementById('maplegend').innerHTML='<span style="flex:none;color:#a59c8b">類別</span>'
-   +`<span class="chip ${mapTypes.size===0?'on':''}" data-action="maptype" data-type="__all">全部</span>`
-   +Object.keys(TYPES).map(t=>`<span class="chip ${mapTypes.has(t)?'on':''}" data-action="maptype" data-type="${t}"><i style="width:10px;height:10px;border-radius:50%;background:${tcolor(t)};display:inline-block;margin-right:3px"></i>${temoji(t)}${t}</span>`).join('');
+   +`<span class="chip ${fTypes.size===0?'on':''}" data-action="ftype" data-type="__all">全部</span>`
+   +Object.keys(TYPES).map(t=>`<span class="chip ${fTypes.has(t)?'on':''}" data-action="ftype" data-type="${t}"><i style="width:10px;height:10px;border-radius:50%;background:${tcolor(t)};display:inline-block;margin-right:3px"></i>${temoji(t)}${t}</span>`).join('');
 }
 function renderMarkers(){
   if(!map) return;
   markers.forEach(m=>map.removeLayer(m)); markers=[];
   places.filter(p=>{
     if(!(p.lat&&p.lng)) return false;
-    if(!(mapTypes.size===0||mapTypes.has(p.type))) return false;
+    if(!passShared(p)) return false;
     if(mapSched) return CNXCore.isScheduled(p.id,plan);
     if(mapDays.size===0) return true;
     return plan.some(e=>e.placeId===p.id&&mapDays.has(e.day));
@@ -357,21 +361,26 @@ function renderMarkers(){
   });
 }
 
-let fTypes=new Set(), fAreas=new Set();
+let fTypes=new Set(), fAreas=new Set(), fTiers=new Set();
 function renderFilters(){
   const ts=Object.keys(TYPES).filter(t=>places.some(p=>p.type===t));
   document.getElementById('typefilter').innerHTML='<span class="flabel">類型</span>'+`<div class="chip ${fTypes.size===0?'on':''}" data-action="ftype" data-type="__all">全部</div>`+ts.map(t=>`<div class="chip ${fTypes.has(t)?'on':''}" data-action="ftype" data-type="${t}">${temoji(t)}${t}</div>`).join('');
   const as=Object.keys(AREAS).filter(x=>places.some(p=>p.area===x));
   document.getElementById('areafilter').innerHTML='<span class="flabel">區域</span>'+`<div class="chip ${fAreas.size===0?'on':''}" data-action="farea" data-area="__all">全部</div>`+as.map(x=>`<div class="chip ${fAreas.has(x)?'on':''}" data-action="farea" data-area="${x}">${x}</div>`).join('');
+  const tiers=[1,2,3,4].filter(t=>places.some(p=>p.tier===t));
+  document.getElementById('tierfilter').innerHTML = tiers.length===0 ? '' :
+    '<span class="flabel">Tier</span>'+`<div class="chip ${fTiers.size===0?'on':''}" data-action="ftier" data-tier="__all">全部</div>`+tiers.map(t=>`<div class="chip ${fTiers.has(t)?'on':''}" data-action="ftier" data-tier="${t}">${TIER_LABEL[t]} tier${t}</div>`).join('')+`<div class="chip ${(fTiers.size===2&&fTiers.has(1)&&fTiers.has(2))?'on':''}" data-action="ftier" data-tier="__top">只看 1+2</div>`;
 }
 function metaBlock(p){
   const sc=placeSched(p.id);
   return `<div class="meta"><span class="k">🕑</span> ${esc(p.hours||'—')}　<span class="k">💵</span> ${esc(p.price||'—')}<br><span class="k">📝</span> ${esc(p.note||'—')}${sc.length?'<br><span class="sched">📅 '+sc.join('、')+'</span>':''}</div>`;
 }
+const TIER_LABEL={1:'①',2:'②',3:'③',4:'④'};
+function tierBadge(p){ return p.tier?` <span class="tierbadge t${p.tier}">${TIER_LABEL[p.tier]}</span>`:''; }
 function cardHTML(p){
   const nolc=notLocated(p);
   return `<div class="place" style="border-left-color:${tcolor(p.type)}">
-    <div class="top"><div class="name">${placeEmoji(p)} ${esc(p.name)} <span class="en">${esc(p.en||'')}</span>${p.tentative?' <span class="tentbadge">待定</span>':''}</div>
+    <div class="top"><div class="name">${placeEmoji(p)} ${esc(p.name)} <span class="en">${esc(p.en||'')}</span>${p.tentative?' <span class="tentbadge">待定</span>':''}${tierBadge(p)}</div>
     <span class="area-chip" style="background:${acolor(p.area)}">${p.area}</span></div>
     ${nolc?'<div class="nolocate">未定位（不在地圖上）</div>':''}
     ${metaBlock(p)}
@@ -381,12 +390,18 @@ function cardHTML(p){
       <a class="pbtn go" href="${gmaps(p)}" target="_blank" rel="noopener">🗺️</a>
     </div></div>`;
 }
+function passShared(p){
+  if(fTypes.size && !fTypes.has(p.type)) return false;
+  if(fAreas.size && !fAreas.has(p.area)) return false;
+  if(fTiers.size && !fTiers.has(p.tier)) return false;
+  return true;
+}
 function renderList(){
   const areaOrder=Object.keys(AREAS);
   let html='';
   Object.keys(TYPES).forEach(type=>{
     if(fTypes.size&&!fTypes.has(type)) return;
-    const inType=places.filter(p=>p.type===type&&(fAreas.size===0||fAreas.has(p.area)));
+    const inType=places.filter(p=>p.type===type && passShared(p));
     if(!inType.length) return;
     html+=`<div class="section"><div class="sechdr">${temoji(type)} ${type} <span class="cnt">（${inType.length}）</span></div>`;
     areaOrder.forEach(area=>{
@@ -462,6 +477,8 @@ function openEdit(id, addTarget, prefill){
   <div><div class="seclabel">區域</div><select id="ed_area">${Object.keys(AREAS).map(x=>`<option ${x===p.area?'selected':''}>${x}</option>`).join('')}</select></div></div>
   <div class="seclabel">狀態</div>
   <div class="row" style="margin-bottom:8px"><span class="chip ${!tentVal?'on':''}" data-action="ed-status" data-tent="0">確定</span><span class="chip ${tentVal?'on':''}" data-action="ed-status" data-tent="1">待定</span></div>
+  <div class="seclabel">Tier（你來標：①一定去 ②滿想去 ③順路 ④可不去）</div>
+  <div class="row" id="ed_tierrow" style="margin-bottom:8px">${[0,1,2,3,4].map(n=>`<span class="chip ${((p.tier||0)===n)?'on':''}" data-action="ed-tier" data-tier="${n}">${n===0?'未分':TIER_LABEL[n]+' tier'+n}</span>`).join('')}</div>
   <div class="seclabel">英文／別名（有填定位與連結更準）</div><input id="ed_en" value="${esc(p.en||'')}" placeholder="例如 Rustic Market">
   <div class="two"><div><div class="seclabel">營業時間</div><input id="ed_hours" value="${esc(p.hours||'')}" placeholder="選填"></div>
   <div><div class="seclabel">價位（單品行情備註）</div><input id="ed_price" value="${esc(p.price||'')}" placeholder="例如 豬腳飯 30–40"></div></div>
@@ -472,7 +489,7 @@ function openEdit(id, addTarget, prefill){
   <div class="row" style="margin-top:6px"><span class="pill pri" data-action="save-edit" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span><span class="pill" data-action="close">取消</span></div>
   ${isNew?'':`<div class="seclabel">定位</div><div class="row"><span class="pill" data-action="geo" data-id="${id}">🔍 自動定位</span><span class="pill" data-action="pinmode" data-id="${id}">📍 在地圖點選位置</span></div>
   <div class="row" style="margin-top:14px;justify-content:flex-end"><span class="pill danger" data-action="del-card" data-id="${id}">刪除卡片</span></div>`}`;
-  openSheet(h); sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tentative=tentVal?'1':'';
+  openSheet(h); sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tentative=tentVal?'1':''; sh.dataset.tier=(p.tier?String(p.tier):'');
 }
 function openIcons(){
   const ks=Object.keys(TYPES);
@@ -513,7 +530,6 @@ document.addEventListener('click',e=>{
   if(a==='arm'){ arm(t.dataset.id); closeSheet(); return; }
   if(a==='disarm'){ disarm(); return; }
   if(a==='pinmode'){ pinStart(t.dataset.id); closeSheet(); return; }
-  if(a==='maptype'){ const tp=t.dataset.type; if(tp==='__all'){mapTypes.clear();} else { mapTypes.has(tp)?mapTypes.delete(tp):mapTypes.add(tp); } renderLegend(); renderMarkers(); return; }
   if(a==='mapday'){ const dy=t.dataset.day;
     if(dy==='__all'){ mapSched=false; mapDays.clear(); }
     else if(dy==='__sched'){ mapSched=true; mapDays.clear(); }
@@ -528,6 +544,7 @@ document.addEventListener('click',e=>{
   if(a==='newcard'){ openEdit(null); return; }
   if(a==='ed-per'){ sh.querySelectorAll('[data-action="ed-per"]').forEach(x=>x.classList.toggle('on',x===t)); sh.dataset.per=t.dataset.per; return; }
   if(a==='ed-status'){ sh.querySelectorAll('[data-action="ed-status"]').forEach(x=>x.classList.toggle('on',x===t)); sh.dataset.tentative=t.dataset.tent==='1'?'1':''; return; }
+  if(a==='ed-tier'){ sh.querySelectorAll('[data-action="ed-tier"]').forEach(x=>x.classList.toggle('on',x===t)); sh.dataset.tier=t.dataset.tier==='0'?'':t.dataset.tier; return; }
   if(a==='toggle-emoji'){ const pn=document.getElementById('emojiPanel'); if(pn){ const open=pn.style.display==='none'; pn.style.display=open?'block':'none'; t.textContent=open?'選 emoji ▴':'選 emoji ▾'; } return; }
   if(a==='pick-emoji'){ const el=document.getElementById('ed_icon'); if(el) el.value=t.dataset.emoji; const pn=document.getElementById('emojiPanel'); if(pn) pn.style.display='none'; const tb=sh.querySelector('[data-action="toggle-emoji"]'); if(tb) tb.textContent='選 emoji ▾'; return; }
   if(a==='icons'){ openIcons(); return; }
@@ -543,12 +560,13 @@ document.addEventListener('click',e=>{
     const numOrNull=s=>{ s=(s||'').trim(); if(s==='')return null; const n=parseFloat(s); return isNaN(n)?null:n; };
     const cost={amount:numOrNull(v('ed_amount')),per:sh.dataset.per==='shared'?'shared':'person'};
     const icon=v('ed_icon'); const tentative=sh.dataset.tentative==='1';
-    if(t.dataset.id==='__new__'){ const np=makePlace({name:v('ed_name')||'未命名地點',en:v('ed_en'),icon,tentative,type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),price:v('ed_price'),note:v('ed_note'),cost}); places.push(np); if(pendingAddTarget){ plan.push({id:uid(),placeId:np.id,day:pendingAddTarget.day,slot:pendingAddTarget.slot}); pendingAddTarget=null; } afterChange(); closeSheet(); geocode(np); }
-    else { const p=getPlace(t.dataset.id); const oldName=p.name,oldEn=p.en; p.name=v('ed_name')||p.name; p.en=v('ed_en'); p.icon=icon; p.tentative=tentative; p.type=document.getElementById('ed_type').value; p.area=document.getElementById('ed_area').value; p.hours=v('ed_hours'); p.price=v('ed_price'); p.note=v('ed_note'); p.cost=cost; afterChange(); closeSheet(); if(!p.lat||p.name!==oldName||p.en!==oldEn) geocode(p); }
+    if(t.dataset.id==='__new__'){ const np=makePlace({name:v('ed_name')||'未命名地點',en:v('ed_en'),icon,tentative,type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),price:v('ed_price'),note:v('ed_note'),cost,tier:sh.dataset.tier?+sh.dataset.tier:null}); places.push(np); if(pendingAddTarget){ plan.push({id:uid(),placeId:np.id,day:pendingAddTarget.day,slot:pendingAddTarget.slot}); pendingAddTarget=null; } afterChange(); closeSheet(); geocode(np); }
+    else { const p=getPlace(t.dataset.id); const oldName=p.name,oldEn=p.en; p.name=v('ed_name')||p.name; p.en=v('ed_en'); p.icon=icon; p.tentative=tentative; p.type=document.getElementById('ed_type').value; p.area=document.getElementById('ed_area').value; p.hours=v('ed_hours'); p.price=v('ed_price'); p.note=v('ed_note'); p.cost=cost; p.tier=sh.dataset.tier?+sh.dataset.tier:null; afterChange(); closeSheet(); if(!p.lat||p.name!==oldName||p.en!==oldEn) geocode(p); }
     return; }
   if(a==='del-card'){ if(confirm('刪除這張卡片？（已排的也會一起移除）')){ plan=plan.filter(x=>x.placeId!==t.dataset.id); places=places.filter(x=>x.id!==t.dataset.id); afterChange(); closeSheet(); } return; }
-  if(a==='ftype'){ const tp=t.dataset.type; if(tp==='__all'){fTypes.clear();} else { fTypes.has(tp)?fTypes.delete(tp):fTypes.add(tp); } renderFilters(); renderList(); return; }
-  if(a==='farea'){ const ar=t.dataset.area; if(ar==='__all'){fAreas.clear();} else { fAreas.has(ar)?fAreas.delete(ar):fAreas.add(ar); } renderFilters(); renderList(); return; }
+  if(a==='ftype'){ const v=t.dataset.type; if(v==='__all') fTypes.clear(); else fTypes.has(v)?fTypes.delete(v):fTypes.add(v); renderFilters(); renderLegend(); renderList(); renderMarkers(); return; }
+  if(a==='farea'){ const v=t.dataset.area; if(v==='__all') fAreas.clear(); else fAreas.has(v)?fAreas.delete(v):fAreas.add(v); renderFilters(); renderList(); renderMarkers(); return; }
+  if(a==='ftier'){ const v=t.dataset.tier; if(v==='__all') fTiers.clear(); else if(v==='__top'){ fTiers.clear(); fTiers.add(1); fTiers.add(2); } else { const n=+v; fTiers.has(n)?fTiers.delete(n):fTiers.add(n);} renderFilters(); renderList(); renderMarkers(); return; }
   if(a==='reset'){ if(confirm('重設成初始資料？')){ places=JSON.parse(JSON.stringify(SEED_PLACES)); plan=seedPlan(); typeIcons={}; typeColors={}; disarm(); save(); renderLegend(); renderAll(); } return; }
   if(a==='close'){ closeSheet(); return; }
 });

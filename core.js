@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  var SCHEMA_VERSION = 12;
+  var SCHEMA_VERSION = 14;
 
   function defaultPer(type) { return type === '住宿' ? 'shared' : 'person'; }
 
@@ -16,6 +16,43 @@
     if (l == null) return h;
     if (h == null) return l;
     return Math.round((l + h) / 2);
+  }
+
+  // 把「事實價格」依使用者門檻、用區間中位數機械歸帶（乙案）。priceFact: {lowThb, highThb}（每人 THB；單一金額則 low==high）。
+  // 無數字金額（只有符號或 null）→ 'unknown'。中位數＝衍生事實，不是主觀判斷；門檻與取捨仍是使用者的。
+  function classifyPriceBand(priceFact, bands) {
+    bands = (bands && typeof bands === 'object') ? bands : {};
+    var mid = (typeof bands.mid === 'number') ? bands.mid : 200;
+    var high = (typeof bands.high === 'number') ? bands.high : 500;
+    if (!priceFact || typeof priceFact.lowThb !== 'number' || typeof priceFact.highThb !== 'number') return 'unknown';
+    var lo = Math.min(priceFact.lowThb, priceFact.highThb);
+    var hi = Math.max(priceFact.lowThb, priceFact.highThb);
+    var midpoint = Math.round((lo + hi) / 2);
+    return (midpoint <= mid) ? 'budget' : (midpoint <= high ? 'mid' : 'high');
+  }
+
+  // 正規區域的代表中心點（初版，可由使用者於 sweep 對照表微調）。
+  var AREA_CENTROIDS = {
+    '古城':   { lat: 18.7880, lng: 98.9860 },
+    '尼曼/西': { lat: 18.7960, lng: 98.9660 },
+    '濱河/東': { lat: 18.7900, lng: 99.0010 },
+    '北/東北': { lat: 18.8080, lng: 98.9800 },
+    '南郊':   { lat: 18.7150, lng: 99.0350 },
+    '東郊':   { lat: 18.7450, lng: 99.1150 }
+  };
+  // 距離單位為「度」（lat/lng 的歐氏距離），非公里。0.18 度的直線距離約 20–28 km（視方向）。
+  // 超過此門檻視為不屬任何市區中心 → 其他。
+  var AREA_MAX_DEG = 0.18;
+
+  function classifyArea(lat, lng) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return '其他';
+    var best = null, bestD = Infinity;
+    Object.keys(AREA_CENTROIDS).forEach(function (name) {
+      var c = AREA_CENTROIDS[name];
+      var d = Math.sqrt(Math.pow(lat - c.lat, 2) + Math.pow(lng - c.lng, 2));
+      if (d < bestD) { bestD = d; best = name; }
+    });
+    return (bestD <= AREA_MAX_DEG) ? best : '其他';
   }
 
   function normalizePlace(p) {
@@ -35,6 +72,8 @@
       price: p.price || '',
       note: p.note || '',
       tentative: p.tentative === true,
+      tier: (p.tier === 1 || p.tier === 2 || p.tier === 3 || p.tier === 4) ? p.tier : null,
+      placeId: (typeof p.placeId === 'string' && p.placeId) ? p.placeId : null,
       cost: {
         amount: midOf(cost),
         per: (cost.per === 'shared' || cost.per === 'person') ? cost.per : defaultPer(type)
@@ -66,6 +105,9 @@
       typeColors: db.typeColors || {}
     };
     if (typeof out.settings.people !== 'number') out.settings.people = 2;
+    if (!out.settings.priceBands || typeof out.settings.priceBands !== 'object') {
+      out.settings.priceBands = { mid: 200, high: 500, per: 'person', currency: 'THB' };
+    }
 
     var migCount = 0;
     (Array.isArray(db.plan) ? db.plan : []).forEach(function (e) {
@@ -216,7 +258,7 @@
     return migrate(merged);
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, defaultPer: defaultPer, normalizePlace: normalizePlace, migrate: migrate, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeDb: mergeDb };
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, AREA_CENTROIDS: AREA_CENTROIDS, classifyArea: classifyArea, migrate: migrate, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeDb: mergeDb };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;
