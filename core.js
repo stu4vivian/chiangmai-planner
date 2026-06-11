@@ -55,6 +55,38 @@
     return (bestD <= AREA_MAX_DEG) ? best : '其他';
   }
 
+  // 從 Google Maps 連結／字串解析座標。只認「已含座標」的長連結與裸座標；短連結(goo.gl)回 null。
+  function parseLatLngFromMapsUrl(url) {
+    if (typeof url !== 'string') return null;
+    var s = url.trim();
+    if (!s) return null;
+    function mk(a, b) {
+      var lat = parseFloat(a), lng = parseFloat(b);
+      if (!isFinite(lat) || !isFinite(lng)) return null;
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+      return { lat: lat, lng: lng };
+    }
+    var m;
+    m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);            // /@lat,lng
+    if (m) return mk(m[1], m[2]);
+    m = s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);         // !3dlat!4dlng
+    if (m) return mk(m[1], m[2]);
+    m = s.match(/[?&](?:q|query|ll|destination|center)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/); // ?q=lat,lng（容許逗號後空白）
+    if (m) return mk(m[1], m[2]);
+    m = s.match(/^(-?\d{1,2}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)$/); // 裸 "lat, lng"
+    if (m) return mk(m[1], m[2]);
+    return null;
+  }
+
+  // 卡片是否通過篩選。三個集合（Set，有 .size/.has）：空集合＝該維度不篩。
+  function passFilters(p, fTypes, fAreas, fTiers) {
+    p = p || {};
+    if (fTypes && fTypes.size && !fTypes.has(p.type)) return false;
+    if (fAreas && fAreas.size && !fAreas.has(p.area)) return false;
+    if (fTiers && fTiers.size && !fTiers.has(p.tier)) return false;
+    return true;
+  }
+
   function normalizePlace(p) {
     p = p || {};
     var type = p.type || '其他';
@@ -258,7 +290,7 @@
     return migrate(merged);
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, AREA_CENTROIDS: AREA_CENTROIDS, classifyArea: classifyArea, migrate: migrate, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeDb: mergeDb };
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, AREA_CENTROIDS: AREA_CENTROIDS, classifyArea: classifyArea, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeDb: mergeDb };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;

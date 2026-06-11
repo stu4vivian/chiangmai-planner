@@ -7,8 +7,8 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐘</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="core.js?v=12"></script>
-<script src="sync.js?v=12"></script>
+<script src="core.js?v=13"></script>
+<script src="sync.js?v=13"></script>
 <style>
   :root{ --bg:#f4f1ea; --card:#fff; --ink:#2e2a24; --muted:#8a8276; --line:#e7e0d2; --daycol:128px; --slcol:46px; }
   *{box-sizing:border-box}
@@ -125,7 +125,7 @@
   .opt{display:flex;align-items:center;gap:8px;background:#f6f2ea;border-radius:9px;padding:10px 12px;margin-bottom:7px;font-size:13px;cursor:pointer;}
   .opt:hover{background:#efe8da;} .opt .d{width:9px;height:9px;border-radius:50%;flex:none;}
   .seclabel{font-size:11px;color:#a59c8b;font-weight:600;margin:12px 0 5px;}
-  .sheet input,.sheet textarea,.sheet select{width:100%;border:1px solid #d8d0c2;border-radius:8px;padding:9px 11px;font-size:14px;margin-bottom:8px;font-family:inherit;background:#fff;}
+  .sheet input,.sheet textarea,.sheet select{width:100%;border:1px solid #d8d0c2;border-radius:8px;padding:9px 11px;font-size:16px;margin-bottom:8px;font-family:inherit;background:#fff;}
   .iconrow{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
   .iconrow .nm{flex:1;font-size:14px;} .iconrow input.em{width:58px;text-align:center;font-size:20px;margin:0;} .iconrow input[type=color]{width:44px;height:38px;padding:2px;margin:0;}
   .iconpickbtn{font-size:12px;border:1px solid #d8d0c2;background:#fff;color:#6b6356;border-radius:8px;padding:0 11px;cursor:pointer;white-space:nowrap;font-family:inherit;flex:none;}
@@ -139,6 +139,20 @@
   .sheet .two{display:flex;gap:8px;} .sheet .two>div{flex:1;}
   .pill{border:1px solid #d8d0c2;background:#fff;border-radius:9px;padding:7px 11px;font-size:12px;cursor:pointer;text-align:center;}
   .pill.pri{background:#2e2a24;color:#fff;border-color:#2e2a24;}
+  /* 編輯卡：固定底部動作列 + 可捲動內容（mobile-first） */
+  .sheet.sheet-edit{display:flex;flex-direction:column;padding:0;overflow:hidden;}
+  .sheet.sheet-edit .edscroll{flex:1;overflow:auto;padding:16px 16px 6px;-webkit-overflow-scrolling:touch;}
+  .sheet.sheet-edit .edfoot{flex:none;display:flex;gap:8px;align-items:center;padding:10px 16px;padding-bottom:calc(10px + env(safe-area-inset-bottom));border-top:1px solid #ece3d2;background:#f7f2e8;}
+  .sheet-edit .edfoot .pill{font-size:15px;padding:11px 16px;border-radius:11px;font-weight:600;}
+  .sheet-edit .edfoot .pill.save{flex:1.3;background:#2e9e7d;color:#fff;border-color:#2e9e7d;font-weight:700;}
+  .sheet-edit .edfoot .pill.cancel{flex:1;}
+  .sheet-edit .edfoot .pill.del{flex:none;color:#c0392b;border-color:#ecd3cf;padding:11px 13px;}
+  .sheet-edit .chip{font-size:14px;padding:7px 13px;border-radius:13px;}
+  .edmore-btn{font-size:14px;color:#5a5145;background:#f4efe4;border:1px solid #e7ddc9;border-radius:10px;padding:11px;text-align:center;margin-top:13px;font-weight:600;cursor:pointer;}
+  .edmore-btn:hover{background:#ece3d2;}
+  .edloc-input{display:flex;gap:7px;align-items:stretch;}
+  .edloc-input input{margin-bottom:0;}
+  .edloc-input .pill{flex:none;white-space:nowrap;}
   .pill.danger{color:#c0392b;border-color:#e3b4ad;}
   .tinytool{font-size:11px;color:#b0a692;cursor:pointer;}
 </style>
@@ -282,18 +296,6 @@ function placeSched(id){ return plan.filter(e=>e.placeId===id).map(e=>{const d=D
 let toastT=null;
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),2600); }
 
-async function geocode(p){
-  const q=(p.en&&/[a-zA-Z]/.test(p.en))?p.en:p.name;
-  toast('定位中：'+p.name+' …');
-  try{
-    const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q+' Chiang Mai Thailand'));
-    const j=await r.json();
-    if(j&&j[0]){ p.lat=parseFloat(j[0].lat); p.lng=parseFloat(j[0].lon); save(); renderMarkers(); toast('已放上地圖：'+p.name+'（可再校正）'); return true; }
-    toast('查不到「'+p.name+'」。填英文名重試，或用「在地圖點選位置」手動標');
-  }catch(e){ toast('定位失敗（網路？）。可用「在地圖點選位置」手動標'); }
-  return false;
-}
-
 let ARMED=null, PINNING=null;
 const armbar=document.getElementById('armbar'), armtext=document.getElementById('armtext');
 function arm(id){ ARMED=id; PINNING=null; const p=getPlace(id); armtext.innerHTML=`正在安排：<b>${esc(p?p.name:'')}</b> — 點任一格放入`; armbar.classList.add('on'); document.body.classList.add('arming'); document.body.classList.remove('pinning'); switchRight('ov'); }
@@ -336,9 +338,17 @@ function renderMapDayFilter(){
    +DAYS.map(d=>`<span class="chip ${mapDays.has(d.id)?'on':''}" data-action="mapday" data-day="${d.id}">${d.label}</span>`).join('');
 }
 function renderLegend(){
-  document.getElementById('maplegend').innerHTML='<span style="flex:none;color:#a59c8b">類別</span>'
+  const tiers=[1,2,3,4].filter(t=>places.some(p=>p.tier===t));
+  let h='<span style="flex:none;color:#a59c8b">類別</span>'
    +`<span class="chip ${fTypes.size===0?'on':''}" data-action="ftype" data-type="__all">全部</span>`
    +Object.keys(TYPES).map(t=>`<span class="chip ${fTypes.has(t)?'on':''}" data-action="ftype" data-type="${t}"><i style="width:10px;height:10px;border-radius:50%;background:${tcolor(t)};display:inline-block;margin-right:3px"></i>${temoji(t)}${t}</span>`).join('');
+  if(tiers.length){
+    h+='<span style="flex:none;color:#a59c8b;margin-left:8px">Tier</span>'
+     +`<span class="chip ${fTiers.size===0?'on':''}" data-action="ftier" data-tier="__all">全部</span>`
+     +tiers.map(t=>`<span class="chip ${fTiers.has(t)?'on':''}" data-action="ftier" data-tier="${t}">${TIER_LABEL[t]} tier${t}</span>`).join('')
+     +`<span class="chip ${(fTiers.size===2&&fTiers.has(1)&&fTiers.has(2))?'on':''}" data-action="ftier" data-tier="__top">只看 1+2</span>`;
+  }
+  document.getElementById('maplegend').innerHTML=h;
 }
 function renderMarkers(){
   if(!map) return;
@@ -390,12 +400,7 @@ function cardHTML(p){
       <a class="pbtn go" href="${gmaps(p)}" target="_blank" rel="noopener">🗺️</a>
     </div></div>`;
 }
-function passShared(p){
-  if(fTypes.size && !fTypes.has(p.type)) return false;
-  if(fAreas.size && !fAreas.has(p.area)) return false;
-  if(fTiers.size && !fTiers.has(p.tier)) return false;
-  return true;
-}
+function passShared(p){ return CNXCore.passFilters(p, fTypes, fAreas, fTiers); }
 function renderList(){
   const areaOrder=Object.keys(AREAS);
   let html='';
@@ -415,7 +420,7 @@ function renderList(){
 }
 
 const ov=document.getElementById('overlay'),sh=document.getElementById('sheet');
-function openSheet(html){ sh.innerHTML='<button class="sheetclose" data-action="close">關閉</button>'+html; ov.classList.add('on'); }
+function openSheet(html){ sh.classList.remove('sheet-edit'); sh.innerHTML='<button class="sheetclose" data-action="close">關閉</button>'+html; ov.classList.add('on'); }
 function closeSheet(){ ov.classList.remove('on'); }
 ov.addEventListener('click',e=>{ if(e.target===ov) closeSheet(); });
 const INTENTS=[{e:'💆',name:'按摩',type:'娛樂'},{e:'🍽️',name:'午餐',type:'食物'},{e:'🍽️',name:'晚餐',type:'食物'},{e:'☕',name:'咖啡/果汁',type:'食物'},{e:'🛍️',name:'逛逛',type:'逛街'}];
@@ -469,27 +474,34 @@ function openEdit(id, addTarget, prefill){
   const isNew=!id; const p=isNew?CNXCore.normalizePlace({type:prefill.type||'其他'}):getPlace(id);
   const nameVal=isNew?(prefill.name||''):p.name;
   const tentVal=isNew?(prefill.tentative===true):!!p.tentative;
-  let h=`<h3>${isNew?'新增地點':'編輯卡片'}</h3><div class="sd">固定欄位用下拉、其他用打的，全部非必填。存檔後自動嘗試定位；查不到可手動標。</div>
-  <div class="seclabel">名稱與圖示</div>
+  const body=`<h3>${isNew?'新增地點':'編輯卡片'}</h3>
+  <div class="seclabel">名稱</div>
   <div class="iconrow"><input class="em" id="ed_icon" value="${esc(p.icon||'')}" placeholder="${esc(temoji(p.type))}"><input id="ed_name" style="flex:1;margin:0" value="${esc(nameVal)}" placeholder="地點／店名"><button type="button" class="iconpickbtn" data-action="toggle-emoji">選 emoji ▾</button></div>
   <div id="emojiPanel" class="emojipanel" style="display:none"><div class="emojigrid" style="margin-bottom:2px"><span class="emojibtn dflt" data-action="pick-emoji" data-emoji="">↺ 用類別預設</span></div>${EMOJI_CATS.map(c=>`<div class="emojicat">${c.label}</div><div class="emojigrid">${c.emojis.map(em=>`<span class="emojibtn" data-action="pick-emoji" data-emoji="${em}">${em}</span>`).join('')}</div>`).join('')}</div>
   <div class="two"><div><div class="seclabel">類型</div><select id="ed_type">${Object.keys(TYPES).map(t=>`<option ${t===p.type?'selected':''}>${t}</option>`).join('')}</select></div>
   <div><div class="seclabel">區域</div><select id="ed_area">${Object.keys(AREAS).map(x=>`<option ${x===p.area?'selected':''}>${x}</option>`).join('')}</select></div></div>
-  <div class="seclabel">狀態</div>
-  <div class="row" style="margin-bottom:8px"><span class="chip ${!tentVal?'on':''}" data-action="ed-status" data-tent="0">確定</span><span class="chip ${tentVal?'on':''}" data-action="ed-status" data-tent="1">待定</span></div>
   <div class="seclabel">Tier（你來標：①一定去 ②滿想去 ③順路 ④可不去）</div>
   <div class="row" id="ed_tierrow" style="margin-bottom:8px">${[0,1,2,3,4].map(n=>`<span class="chip ${((p.tier||0)===n)?'on':''}" data-action="ed-tier" data-tier="${n}">${n===0?'未分':TIER_LABEL[n]+' tier'+n}</span>`).join('')}</div>
-  <div class="seclabel">英文／別名（有填定位與連結更準）</div><input id="ed_en" value="${esc(p.en||'')}" placeholder="例如 Rustic Market">
-  <div class="two"><div><div class="seclabel">營業時間</div><input id="ed_hours" value="${esc(p.hours||'')}" placeholder="選填"></div>
-  <div><div class="seclabel">價位（單品行情備註）</div><input id="ed_price" value="${esc(p.price||'')}" placeholder="例如 豬腳飯 30–40"></div></div>
-  <div class="seclabel">備註</div><textarea id="ed_note" rows="2" placeholder="選填">${esc(p.note||'')}</textarea>
+  <div class="seclabel">營業時間</div><input id="ed_hours" value="${esc(p.hours||'')}" placeholder="選填">
   <div class="seclabel">預估花費（NT$／每次排入）</div>
   <input id="ed_amount" inputmode="numeric" value="${p.cost&&p.cost.amount!=null?p.cost.amount:''}" placeholder="例如 350">
-  <div class="row" style="margin-bottom:8px"><span class="chip ${(!p.cost||p.cost.per!=='shared')?'on':''}" data-action="ed-per" data-per="person">每人</span><span class="chip ${(p.cost&&p.cost.per==='shared')?'on':''}" data-action="ed-per" data-per="shared">共用（房/車）</span></div>
-  <div class="row" style="margin-top:6px"><span class="pill pri" data-action="save-edit" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span><span class="pill" data-action="close">取消</span></div>
-  ${isNew?'':`<div class="seclabel">定位</div><div class="row"><span class="pill" data-action="geo" data-id="${id}">🔍 自動定位</span><span class="pill" data-action="pinmode" data-id="${id}">📍 在地圖點選位置</span></div>
-  <div class="row" style="margin-top:14px;justify-content:flex-end"><span class="pill danger" data-action="del-card" data-id="${id}">刪除卡片</span></div>`}`;
-  openSheet(h); sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tentative=tentVal?'1':''; sh.dataset.tier=(p.tier?String(p.tier):'');
+  <div class="row" style="margin-bottom:4px"><span class="chip ${(!p.cost||p.cost.per!=='shared')?'on':''}" data-action="ed-per" data-per="person">每人</span><span class="chip ${(p.cost&&p.cost.per==='shared')?'on':''}" data-action="ed-per" data-per="shared">共用（房/車）</span></div>
+  <div class="edmore-btn" data-action="toggle-more">＋ 更多細節（英文名・價位・備註・待定・定位）▾</div>
+  <div id="edMore" style="display:none">
+    <div class="seclabel">英文／別名（有填比對更準）</div><input id="ed_en" value="${esc(p.en||'')}" placeholder="例如 Rustic Market">
+    <div class="seclabel">價位（單品行情備註）</div><input id="ed_price" value="${esc(p.price||'')}" placeholder="例如 豬腳飯 30–40">
+    <div class="seclabel">備註</div><textarea id="ed_note" rows="2" placeholder="選填">${esc(p.note||'')}</textarea>
+    <div class="seclabel">狀態</div>
+    <div class="row" style="margin-bottom:8px"><span class="chip ${!tentVal?'on':''}" data-action="ed-status" data-tent="0">確定</span><span class="chip ${tentVal?'on':''}" data-action="ed-status" data-tent="1">待定</span></div>
+    ${isNew?`<div class="seclabel">📍 定位</div><div class="nolocate">存檔後可在這張卡用「貼 Google Maps 連結」或「在地圖點選位置」定位。</div>`:`<div class="seclabel">📍 定位</div>
+    <div class="edloc-input"><input id="ed_gmaps" placeholder="貼 Google Maps 連結（含座標）"><span class="pill" data-action="paste-gmaps" data-id="${id}">定位</span></div>
+    <div class="row" style="margin-top:7px"><span class="pill" data-action="pinmode" data-id="${id}">📍 在地圖點選位置</span></div>
+    <div class="nolocate">手機「分享」的短連結（goo.gl）抓不到座標——請改用點地圖，或把名字交給 Claude 自動定位。</div>`}
+  </div>`;
+  const foot=`<div class="edfoot">${isNew?'':`<span class="pill del" data-action="del-card" data-id="${id}">🗑</span>`}<span class="pill cancel" data-action="close">取消</span><span class="pill save" data-action="save-edit" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span></div>`;
+  openSheet(`<div class="edscroll">${body}</div>${foot}`);
+  sh.classList.add('sheet-edit');
+  sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tentative=tentVal?'1':''; sh.dataset.tier=(p.tier?String(p.tier):'');
 }
 function openIcons(){
   const ks=Object.keys(TYPES);
@@ -546,13 +558,14 @@ document.addEventListener('click',e=>{
   if(a==='ed-status'){ sh.querySelectorAll('[data-action="ed-status"]').forEach(x=>x.classList.toggle('on',x===t)); sh.dataset.tentative=t.dataset.tent==='1'?'1':''; return; }
   if(a==='ed-tier'){ sh.querySelectorAll('[data-action="ed-tier"]').forEach(x=>x.classList.toggle('on',x===t)); sh.dataset.tier=t.dataset.tier==='0'?'':t.dataset.tier; return; }
   if(a==='toggle-emoji'){ const pn=document.getElementById('emojiPanel'); if(pn){ const open=pn.style.display==='none'; pn.style.display=open?'block':'none'; t.textContent=open?'選 emoji ▴':'選 emoji ▾'; } return; }
+  if(a==='toggle-more'){ const m=document.getElementById('edMore'); if(m){ const open=m.style.display==='none'; m.style.display=open?'block':'none'; t.textContent=open?'－ 收起更多細節 ▴':'＋ 更多細節（英文名・價位・備註・待定・定位）▾'; } return; }
+  if(a==='paste-gmaps'){ const inp=document.getElementById('ed_gmaps'); const p=getPlace(t.dataset.id); if(!inp||!p) return; const ll=CNXCore.parseLatLngFromMapsUrl(inp.value); if(!ll){ toast('連結裡找不到座標（可能是短連結）。請改用「在地圖點選位置」，或把名字交給我'); return; } p.lat=ll.lat; p.lng=ll.lng; save(); renderMarkers(); toast('已放上地圖：'+p.name+'（可再用點地圖校正）'); return; }
   if(a==='pick-emoji'){ const el=document.getElementById('ed_icon'); if(el) el.value=t.dataset.emoji; const pn=document.getElementById('emojiPanel'); if(pn) pn.style.display='none'; const tb=sh.querySelector('[data-action="toggle-emoji"]'); if(tb) tb.textContent='選 emoji ▾'; return; }
   if(a==='icons'){ openIcons(); return; }
   if(a==='impexp'){ openImpExp(); return; }
   if(a==='copy-link'){ copySyncLink(); return; }
   if(a==='copy-export'){ const ta=document.getElementById('exp'); ta.select(); try{navigator.clipboard.writeText(ta.value);}catch(e){} toast('已複製，貼給 Claude 即可'); return; }
   if(a==='do-import'){ importJSON(document.getElementById('imp').value); return; }
-  if(a==='geo'){ const p=getPlace(t.dataset.id); if(p) geocode(p); return; }
   if(a==='save-icons'){ Object.keys(TYPES).forEach((tp,i)=>{ const em=document.getElementById('ic_'+i).value.trim(); if(em) typeIcons[tp]=em; else delete typeIcons[tp]; const cl=document.getElementById('cl_'+i).value; if(cl) typeColors[tp]=cl; }); save(); renderLegend(); renderAll(); closeSheet(); toast('類別樣式已更新'); return; }
   if(a==='reset-icons'){ typeIcons={}; typeColors={}; save(); renderLegend(); renderAll(); closeSheet(); toast('已回復預設'); return; }
   if(a==='save-edit'){
@@ -560,17 +573,17 @@ document.addEventListener('click',e=>{
     const numOrNull=s=>{ s=(s||'').trim(); if(s==='')return null; const n=parseFloat(s); return isNaN(n)?null:n; };
     const cost={amount:numOrNull(v('ed_amount')),per:sh.dataset.per==='shared'?'shared':'person'};
     const icon=v('ed_icon'); const tentative=sh.dataset.tentative==='1';
-    if(t.dataset.id==='__new__'){ const np=makePlace({name:v('ed_name')||'未命名地點',en:v('ed_en'),icon,tentative,type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),price:v('ed_price'),note:v('ed_note'),cost,tier:sh.dataset.tier?+sh.dataset.tier:null}); places.push(np); if(pendingAddTarget){ plan.push({id:uid(),placeId:np.id,day:pendingAddTarget.day,slot:pendingAddTarget.slot}); pendingAddTarget=null; } afterChange(); closeSheet(); geocode(np); }
-    else { const p=getPlace(t.dataset.id); const oldName=p.name,oldEn=p.en; p.name=v('ed_name')||p.name; p.en=v('ed_en'); p.icon=icon; p.tentative=tentative; p.type=document.getElementById('ed_type').value; p.area=document.getElementById('ed_area').value; p.hours=v('ed_hours'); p.price=v('ed_price'); p.note=v('ed_note'); p.cost=cost; p.tier=sh.dataset.tier?+sh.dataset.tier:null; afterChange(); closeSheet(); if(!p.lat||p.name!==oldName||p.en!==oldEn) geocode(p); }
+    if(t.dataset.id==='__new__'){ const np=makePlace({name:v('ed_name')||'未命名地點',en:v('ed_en'),icon,tentative,type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),price:v('ed_price'),note:v('ed_note'),cost,tier:sh.dataset.tier?+sh.dataset.tier:null}); places.push(np); if(pendingAddTarget){ plan.push({id:uid(),placeId:np.id,day:pendingAddTarget.day,slot:pendingAddTarget.slot}); pendingAddTarget=null; } afterChange(); closeSheet(); toast('已新增「'+np.name+'」（尚未定位，可在卡片用貼連結或點地圖）'); }
+    else { const p=getPlace(t.dataset.id); p.name=v('ed_name')||p.name; p.en=v('ed_en'); p.icon=icon; p.tentative=tentative; p.type=document.getElementById('ed_type').value; p.area=document.getElementById('ed_area').value; p.hours=v('ed_hours'); p.price=v('ed_price'); p.note=v('ed_note'); p.cost=cost; p.tier=sh.dataset.tier?+sh.dataset.tier:null; afterChange(); closeSheet(); }
     return; }
   if(a==='del-card'){ if(confirm('刪除這張卡片？（已排的也會一起移除）')){ plan=plan.filter(x=>x.placeId!==t.dataset.id); places=places.filter(x=>x.id!==t.dataset.id); afterChange(); closeSheet(); } return; }
   if(a==='ftype'){ const v=t.dataset.type; if(v==='__all') fTypes.clear(); else fTypes.has(v)?fTypes.delete(v):fTypes.add(v); renderFilters(); renderLegend(); renderList(); renderMarkers(); return; }
-  if(a==='farea'){ const v=t.dataset.area; if(v==='__all') fAreas.clear(); else fAreas.has(v)?fAreas.delete(v):fAreas.add(v); renderFilters(); renderList(); renderMarkers(); return; }
-  if(a==='ftier'){ const v=t.dataset.tier; if(v==='__all') fTiers.clear(); else if(v==='__top'){ fTiers.clear(); fTiers.add(1); fTiers.add(2); } else { const n=+v; fTiers.has(n)?fTiers.delete(n):fTiers.add(n);} renderFilters(); renderList(); renderMarkers(); return; }
+  if(a==='farea'){ const v=t.dataset.area; if(v==='__all') fAreas.clear(); else fAreas.has(v)?fAreas.delete(v):fAreas.add(v); renderFilters(); renderLegend(); renderList(); renderMarkers(); return; }
+  if(a==='ftier'){ const v=t.dataset.tier; if(v==='__all') fTiers.clear(); else if(v==='__top'){ fTiers.clear(); fTiers.add(1); fTiers.add(2); } else { const n=+v; fTiers.has(n)?fTiers.delete(n):fTiers.add(n);} renderFilters(); renderLegend(); renderList(); renderMarkers(); return; }
   if(a==='reset'){ if(confirm('重設成初始資料？')){ places=JSON.parse(JSON.stringify(SEED_PLACES)); plan=seedPlan(); typeIcons={}; typeColors={}; disarm(); save(); renderLegend(); renderAll(); } return; }
   if(a==='close'){ closeSheet(); return; }
 });
-async function importJSON(text){
+function importJSON(text){
   let d; try{ d=JSON.parse(text); }catch(e){ toast('JSON 格式有誤，無法匯入'); return; }
   const inPlaces=Array.isArray(d)?d:(d.places||[]);
   if(!inPlaces.length){ toast('沒有可匯入的 places'); return; }
@@ -583,9 +596,8 @@ async function importJSON(text){
   });
   if(d.plan&&Array.isArray(d.plan)){ d.plan.forEach(e=>{ if(!plan.some(x=>x.id===e.id)) plan.push(e); }); }
   afterChange(); closeSheet();
-  const need=touched.filter(p=>!(p.lat&&p.lng));
-  toast(`匯入完成：新增 ${added}、更新 ${updated}${need.length?'，自動定位中…':''}`);
-  for(const p of need){ await geocode(p); }  // 沒座標的自動上地圖
+  const noloc=touched.filter(p=>!(p.lat&&p.lng)).length;
+  toast(`匯入完成：新增 ${added}、更新 ${updated}${noloc?`（${noloc} 筆未含座標，未定位）`:''}`);
 }
 const budgetOpen=new Set();
 function nt(n){ return 'NT$ '+Math.round(n).toLocaleString('en-US'); }
@@ -639,7 +651,7 @@ function openManualLine(id){
   <div class="row" style="margin-top:6px"><span class="pill pri" data-action="ml-save" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span>${isNew?'':`<span class="pill danger" data-action="ml-del" data-id="${id}">刪除</span>`}<span class="pill" data-action="close">取消</span></div>`;
   openSheet(h); sh.dataset.mlper=m.per==='shared'?'shared':'person';
 }
-function afterChange(){ save(); renderMatrix(); renderMarkers(); renderFilters(); renderList(); if(rView==='budget') renderBudget(); }
+function afterChange(){ save(); renderMatrix(); renderMarkers(); renderFilters(); renderLegend(); renderList(); if(rView==='budget') renderBudget(); }
 let rView='ov';
 function switchRight(r){
   rView=r;
