@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>清邁・2026 夏</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐘</text></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="core.js?v=26"></script>
+<script src="sync.js?v=22"></script>
+<link rel="stylesheet" href="styles.css?v=35">
+</head>
+<body>
+<header>
+  <button id="verbtn" data-action="verbtn">🗂️</button>
+  <nav class="tabs">
+    <button class="tabbtn active" data-action="tab" data-pg="flow">總覽</button>
+    <button class="tabbtn" data-action="tab" data-pg="lib">庫</button>
+    <button class="tabbtn" data-action="tab" data-pg="budget">💰</button>
+  </nav>
+  <span class="gear" data-action="settings">⚙</span>
+</header>
+
+<div id="mapdrawer" class="collapsed">
+  <div id="mapbar" data-action="mapbar"><span id="mapbartxt">🗺️ 地圖 ▾</span><button id="pinbtn" data-action="mappin" title="釘住（不自動收合）">📌 釘住</button></div>
+  <div class="mapbody"><div id="map"></div></div>
+</div>
+
+<main>
+  <section id="pg-flow"><div class="ov-head"><span>整趟</span><span>早</span><span>午</span><span>晚</span></div><div id="ribbon"></div></section>
+  <section id="pg-lib" hidden>
+    <div id="ribbonMini"></div>
+    <div id="splitbar"><span></span></div>
+    <div id="libBody">
+      <div class="lib-search"><input id="libSearch" placeholder="🔍 搜店名／memo"><span class="add" data-action="lib-new">🔗 ＋新增</span><span class="add" id="splitBtn" data-action="lib-split">⇅ 粗流</span></div>
+      <div class="caps" id="libCaps"></div>
+      <div class="capnel" id="libCapPanel" hidden></div>
+      <div id="triageStrip"></div>
+      <div class="lib-count" id="libCount"></div>
+      <div id="listgrid"></div>
+    </div>
+  </section>
+  <section id="pg-budget" hidden></section>
+  <section id="pg-detail" class="pane-detail"></section>
+</main>
+
+<div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="app.js?v=37"></script>
+</body>
+</html>

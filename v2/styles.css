@@ -1,0 +1,399 @@
+  :root{ --bg:#f4f1ea; --card:#fff; --ink:#2e2a24; --muted:#8a8276; --line:#e7e0d2;
+    /* Tier 色票單一真相（Task B）：沙墨主題下的低飽和色階——背景=淡色塊／字=同色系深字，非飽和原色。T1 最重→T4 最輕。 */
+    --t1-bg:#f3ddd5; --t1-fg:#9c4631; --t2-bg:#f4e7cf; --t2-fg:#9a6e25; --t3-bg:#dde7ec; --t3-fg:#3f6478; --t4-bg:#e7e3da; --t4-fg:#7c7466; }
+  *{box-sizing:border-box}
+  input,select,textarea{font-size:16px}   /* 16px：iOS 對焦不放大（移除 maximum-scale 後靠字級防縮放，並還原雙指縮放可近用性）；button 各自指定字級，不受此規則影響 */
+  button{font-size:14px}
+  body{margin:0;font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;background:var(--bg);color:var(--ink);}
+  header{background:#2e2a24;color:#f4f1ea;height:46px;padding:0 12px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:600;}
+  #verbtn{background:#3a352c;color:#f4f1ea;border:1px solid #57503f;border-radius:8px;padding:5px 9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;min-width:0;max-width:52vw;display:inline-flex;align-items:center;gap:4px;overflow:hidden;}
+  #verbtn .vname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}   /* 長版本名截斷成 …：🗂️ 與 ▾ 在 span 外不被吃掉，桌機 52vw 充裕、手機截斷不破版（FIX1） */
+  .tabs{display:flex;gap:2px;margin-left:auto;}
+  .tabbtn{border:0;background:transparent;color:#cfc8ba;font-size:13px;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  .tabbtn.active{background:var(--bg);color:#2e2a24;font-weight:700;}
+  .gear{font-size:15px;color:#cfc8ba;cursor:pointer;white-space:nowrap;padding:4px 2px;}
+  .gear:hover{color:#fff;}
+
+  /* 地圖抽屜 B：collapsed（38px 一條）⇄ expanded（上半屏）＋ pinned（📌 不自動收） */
+  #mapdrawer{position:sticky;top:46px;z-index:500;background:var(--bg);border-bottom:1px solid var(--line);}
+  #mapbar{height:38px;display:flex;align-items:center;gap:8px;padding:0 12px;font-size:13px;font-weight:600;color:#6b6356;background:#ece6da;cursor:pointer;user-select:none;}
+  #pinbtn{margin-left:auto;border:1px solid #d8d0c2;background:#fff;color:#6b6356;border-radius:7px;padding:3px 9px;font-size:12px;cursor:pointer;font-family:inherit;}
+  #pinbtn.on{background:#e8a13a;color:#fff;border-color:#e8a13a;}
+  #mapdrawer .mapbody{display:none;}
+  @media(max-width:1099px){
+    #mapdrawer.expanded .mapbody{display:block;height:calc(50vh - 38px);}
+  }
+  #map{height:100%;}
+  main>section{padding:12px;max-width:1480px;margin:0 auto;}
+  .placeholder{font-size:13px;color:#a59c8b;padding:36px 0;text-align:center;}
+
+  /* ── 總覽矩陣（切片 A Task 6，移植 _prototype_overview.html 行 22–35）：天×早午晚格子；硬色換成現有 :root 變數，日期塊背景 render 時 inline zoneColor()。--line2 在本 app :root 未定義→分隔線改用 --line（既有）。 */
+  /* ── 總覽矩陣（切片A 響應式）：欄寬/間距/日號尺寸走變數，手機緊湊擠出字寬、桌機放寬留白；標題與格內容皆「左對齊」消除飄移感 ── */
+  #pg-flow{padding:0;--ovDay:36px;--ovGap:4px;--ovChip:30px;--ovPad:9px;}
+  .ov-head,.ov-day{display:grid;grid-template-columns:var(--ovDay) repeat(3,minmax(0,1fr));gap:var(--ovGap);padding-left:var(--ovPad);padding-right:var(--ovPad);}
+  .ov-head{padding-top:7px;padding-bottom:6px;font-size:12px;color:var(--muted);position:sticky;top:46px;background:var(--bg);z-index:5;border-bottom:0.5px solid var(--line);}
+  .ov-head span{text-align:left;}
+  .ov-day{padding-top:7px;padding-bottom:7px;border-bottom:0.5px solid var(--line);align-items:stretch;cursor:pointer;}
+  .ov-day:active{background:#faf7f0;}
+  .ov-dnode{display:flex;flex-direction:column;align-items:flex-start;padding-top:1px;min-width:0;}
+  .ov-dchip{width:var(--ovChip);height:var(--ovChip);border-radius:8px;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.04;font-weight:700;font-size:13px;flex:none;}
+  .ov-dchip .wd{font-size:11px;font-weight:600;opacity:.92;}
+  .ov-zone{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+  .ov-cell{min-height:44px;display:flex;flex-direction:column;gap:4px;padding-top:1px;}
+  .ov-line{display:flex;align-items:center;gap:3px;font-size:13px;line-height:1.3;min-width:0;}
+  .ov-line .em{flex:none;font-size:12px;}
+  .ov-line .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+  .ov-warn{flex:none;font-size:11px;}
+  .ov-empty{display:flex;align-items:flex-start;padding-top:3px;color:var(--muted);font-size:13px;}
+  .ov-empty.ov-tent{color:#9a6e25;font-size:11px;font-weight:700;white-space:nowrap;}   /* 空格＋待定：提醒「這格之後要填」（Vivian #3，總覽看得到待定） */
+  .ov-tent-line{color:#9a6e25;font-size:11px;font-weight:700;}
+  .pane-detail{display:none;}   /* 細看右欄：僅桌機 has-detail 時顯示（手機走 bottom sheet） */
+
+  /* 粗流時間軸（Task 11）：一天一行、脊線圓點色＝base 區（TRIP.zones 色票） */
+  /* #ribbon＝總覽矩陣容器；舊時間軸的左 padding(30px)＋脊線已移除——矩陣日號在格內(42px 欄)、不需左掛空間（切片A #1 修正：左側空白壓縮欄寬） */
+  .rb-day{position:relative;margin-bottom:13px;cursor:pointer;}
+  .rb-node{position:absolute;left:-30px;top:0;width:30px;height:30px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.18);}
+  .rb-node .nw{font-size:11px;font-weight:600;opacity:.85;}
+  .rb-zlab{font-size:11px;color:#a59c8b;margin-bottom:5px;}
+  .rb-items{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:26px;}
+  .rb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;}   /* 長店名截斷：行不到螢幕邊（Black Canyon 等） */
+  .rb-meal{display:flex;align-items:center;gap:5px;background:#fff7ea;border:1px solid #f0dcb8;border-radius:9px;padding:3px 9px 3px 6px;font-size:12px;color:#4d463c;}
+  .rb-meal .ml{font-size:11px;font-weight:800;color:#fff;background:#d99a3a;border-radius:5px;padding:1px 4px;}
+  /* 行程球時段標（上午/午後/傍晚/晚）：粗流上可一眼讀早晚 */
+  .rb-ctx{font-size:11px;font-weight:800;color:#fff;background:#9bbf6f;border-radius:5px;padding:1px 4px;flex:none;}
+  /* A 案空錨點（CHANGE 3）：視覺極輕——細虛線淡 pill、矮（不超過真項目高度），但用「透明上下 padding」把點擊熱區撐到 ≥44px。
+     技巧：visible pill 畫在 content-box（background-clip:content-box＋邊框畫在 inner span），外層只負責熱區，故視覺權重與點擊區解耦、且熱區不靠絕對定位（不會誤吃鄰項點擊）。 */
+  .rb-meal.empty{background:transparent;border:0;padding:12px 9px;margin:0;display:inline-flex;align-items:center;line-height:1;-webkit-tap-highlight-color:transparent;cursor:pointer;}
+  .rb-meal.empty .ev{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:#bcab86;border:1px dashed #e0cfa6;border-radius:8px;padding:4px 9px;background:transparent;}
+  .rb-meal.empty .ml{background:transparent;color:#c3b48f;font-weight:700;font-size:11px;padding:0;}
+  .rb-act{display:flex;align-items:center;gap:5px;background:#fff;border-radius:20px;padding:3px 10px;font-size:12px;color:#4d463c;box-shadow:inset 0 0 0 1px #ece3d2;}
+  .rb-act .dot{width:7px;height:7px;border-radius:50%;flex:none;}
+  .rb-flag{font-size:11px;font-weight:800;border-radius:6px;padding:2px 7px;white-space:nowrap;}
+  .rb-flag.tent{background:#f3d48a;color:#7a5500;border:1px dashed #c9991f;}
+  .rb-flag.pk{background:#e8742c;color:#fff;}
+
+  /* 桌機三欄：地圖 0.9fr｜中欄（粗流/💰）1.1fr｜庫 1fr；地圖可收成 46px 軌條 */
+  @media(min-width:768px) and (max-width:1099px){   /* 平板：總覽置中＋欄距加大（spec §5 新增斷點，免套手機版擠） */
+    #pg-flow{--ovDay:52px;--ovGap:10px;--ovChip:36px;--ovPad:16px;}
+    .ov-head,.ov-day{max-width:860px;margin-left:auto;margin-right:auto;}
+    .ov-dchip{font-size:15px;}
+    .ov-line{font-size:14px;}
+  }
+  @media(min-width:1100px){
+    body{display:grid;grid-template-columns:1.15fr 1.6fr 0.95fr;grid-template-rows:46px calc(100vh - 46px);height:100vh;overflow:hidden;}   /* 切片A：總覽(中)最寬＝主角；地圖(左)加寬>庫/細看(右)；地圖可收成軌條讓總覽更寬 */
+    body:has(#mapdrawer.collapsed){grid-template-columns:46px 1.7fr 1fr;}
+    header{grid-column:1/-1;position:static;}
+    #mapdrawer{grid-row:2;grid-column:1;position:static;display:flex;flex-direction:column;border-right:1px solid var(--line);border-bottom:0;}
+    #mapdrawer .mapbody{display:block;flex:1;height:auto;}
+    #mapdrawer.collapsed .mapbody{display:none;}
+    #mapdrawer.collapsed #mapbar{padding:0 8px;overflow:hidden;}
+    #mapdrawer.collapsed #pinbtn{display:none;}
+    main{display:contents;}
+    main>section{grid-row:2;min-width:0;overflow-y:auto;max-width:none;margin:0;}
+    #pg-flow,#pg-budget{grid-column:2;}
+    .ov-head{top:0;font-size:13px;padding-top:12px;padding-bottom:9px;}    /* 桌機：表頭貼 section 頂(修#2)＋字級放大 */
+    #pg-flow{--ovDay:62px;--ovGap:14px;--ovChip:40px;--ovPad:18px;}        /* 桌機留白：日期欄加寬、間距放大、邊距舒適（修#3「早離日期太近/擠」） */
+    .ov-dchip{font-size:17px;border-radius:10px;}
+    .ov-dchip .wd{font-size:12px;}
+    .ov-zone{font-size:12px;margin-top:4px;}
+    .ov-cell{min-height:54px;}
+    .ov-line{font-size:14px;gap:6px;}
+    .ov-line .em{font-size:14px;}
+    #pg-lib{grid-column:3;background:#fbf8f1;border-left:1px solid var(--line);}
+    /* 切片A Phase4：桌機點某天→細看開在右欄(暫代庫位)，地圖＋總覽不動 */
+    body.has-detail .pane-detail{display:flex;flex-direction:column;grid-column:3;grid-row:2;background:#fff;border-left:1px solid var(--line);overflow-y:auto;padding:14px 16px 24px;position:relative;}
+    body.has-detail #pg-lib{display:none;}
+    .dt-paneclose{position:absolute;top:12px;right:14px;font-size:13px;color:#6b6356;background:#f4f1ea;border:1px solid var(--line);border-radius:8px;padding:5px 11px;cursor:pointer;font-family:inherit;}
+    #pg-lib[hidden]{display:block;}
+    .tabbtn[data-pg="lib"]{display:none;}
+    #splitBtn{display:none;}              /* 桌機三欄常駐，不需並看鈕 */
+  }
+
+  .leaflet-popup-content{font-size:13px;line-height:1.55;}
+  .popbtn{display:inline-block;margin-top:7px;background:#e8a13a;color:#fff;padding:5px 10px;border-radius:7px;cursor:pointer;font-weight:600;}
+  /* 地圖 marker（Task D）：圖示 only（不再每顆掛常駐店名標→手機古城群不再重疊/截斷）；名稱進 popup（點才出）。type 色描邊辨類別。 */
+  .mapicon{width:26px;height:26px;border-radius:50%;background:#fff;border:2.5px solid #999;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.3);}
+
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#2e2a24;color:#fff;padding:9px 16px;border-radius:20px;font-size:13px;z-index:1400;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center;}
+  .toast.on{opacity:.96;}
+
+  .newbtn{border:0;background:#e8a13a;color:#fff;border-radius:9px;padding:9px 16px;font-size:14px;cursor:pointer;}
+  .ghostbtn{border:1px solid #d8d0c2;background:#fff;color:#6b6356;border-radius:9px;padding:9px 13px;font-size:13px;cursor:pointer;}
+  /* 編輯卡／版本等內嵌膠囊：與 .fchip／.cap 同家族（圓角 9、實心墨底 on 態） */
+  .chip{border:1px solid #d8d0c2;background:#fff;border-radius:9px;padding:5px 11px;font-size:12px;cursor:pointer;color:#6b6356;}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+
+  /* ── 庫頁 v2（Task 17）：搜尋列＋膠囊橫滑＋三行密度B列＋triage條 ── */
+  .lib-search{display:flex;align-items:stretch;gap:6px;margin-bottom:8px;}
+  .lib-search input{flex:1;min-width:0;border:1px solid #e2d9c8;border-radius:9px;padding:8px 11px;font-size:16px;background:#fff;box-sizing:border-box;}
+  .lib-search .add{flex:none;display:inline-flex;align-items:center;border:1px solid #d8cdb8;background:#fff;color:#6b6356;border-radius:9px;padding:0 11px;font-size:13px;cursor:pointer;white-space:nowrap;font-family:inherit;box-sizing:border-box;}
+  .caps{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:8px;padding-bottom:2px;}
+  .cap{flex:none;display:inline-flex;align-items:center;min-height:34px;font-size:12.5px;border:1px solid #e2d9c8;border-radius:9px;padding:6px 12px;color:#6b6356;background:#fff;white-space:nowrap;cursor:pointer;font-family:inherit;transition:background .12s,border-color .12s,color .12s;}
+  .cap.set{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .cap.open{border-color:#caa15a;box-shadow:0 0 0 1px #caa15a inset;}   /* 目前就地展開中的維度 */
+  /* 膠囊就地展開面板（取代彈窗）：緊貼在膠囊列下方，自動高度、用同一套 .fchip */
+  .capnel{background:#fbf8f1;border:1px solid #ece3d2;border-radius:11px;padding:9px 11px;margin-bottom:10px;}
+  .capnel .cn-head{display:flex;align-items:baseline;gap:7px;margin-bottom:8px;}
+  .capnel .cn-head .lab{font-size:12px;font-weight:800;color:#6b6356;}
+  .capnel .cn-head .hint{font-size:11px;color:#a59c8b;}
+  .capnel .cn-head .done{margin-left:auto;font-size:12px;color:#7c7466;cursor:pointer;border:1px solid #e0d8c8;background:#fff;border-radius:8px;padding:4px 11px;font-family:inherit;min-height:30px;}
+  .capnel .cn-chips{display:flex;flex-wrap:wrap;gap:7px;}
+  .lib-count{font-size:11px;color:#a59c8b;margin:0 0 8px 2px;}
+  .lrow{background:#fff;border-radius:10px;padding:8px 10px;margin-bottom:6px;box-shadow:inset 0 0 0 1px #ece3d2;cursor:pointer;}
+  .lrow .l1{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:#2e2a24;}
+  .lrow .l1 .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .lrow .l1 .pr{margin-left:auto;font-size:12px;font-weight:700;color:#4d463c;white-space:nowrap;}
+  .lrow .l2{font-size:12px;color:#8a7d63;margin-top:3px;line-height:1.4;word-break:break-word;}
+  .lrow .l3{font-size:11px;color:#a59c8b;margin-top:3px;line-height:1.4;}
+  .lrow .l3 .on{color:#5a7a3a;font-weight:700;}
+  /* ── Tier 徽章單一視覺（Task B）：tierBadge() 全畫面共用的唯一一套 .tbadge；沙墨低飽和色塊＋同色系深字 ── */
+  .tbadge{display:inline-flex;align-items:center;justify-content:center;min-width:30px;box-sizing:border-box;font-size:11px;font-weight:800;line-height:1;border-radius:5px;padding:3px 6px;flex:none;letter-spacing:.2px;}   /* 定寬 30px 置中槽：T1–T4 與未標＋標同寬，店名起始 x 不再因徽章寬度抖動（FIX2，庫列＋粗流共用） */
+  .tbadge.t1{background:var(--t1-bg);color:var(--t1-fg);} .tbadge.t2{background:var(--t2-bg);color:var(--t2-fg);}
+  .tbadge.t3{background:var(--t3-bg);color:var(--t3-fg);} .tbadge.t4{background:var(--t4-bg);color:var(--t4-fg);}
+  .tbadge.t0{background:transparent;color:#a08e6a;box-shadow:inset 0 0 0 1px #ddd0b4;font-weight:700;padding-left:4px;padding-right:4px;}   /* ＋標（2 全形字）橫向 padding 收到 4px，才能塞進 30px 定寬＝與 T1–T4 同寬（FIX2） */
+  .ltier{cursor:pointer;}   /* 庫列徽章可點＝就地展開 tier chips（視覺同 .tbadge，只多游標） */
+  /* tier-SET 選擇 chips（庫列彈出＋triage）：resting 用同一套 .tbadge 色票家族，只是更大可點；on＝該色塊加深邊框 */
+  .ltier-pop{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px;padding-top:7px;border-top:1px dashed #ece3d2;}
+  .tchip{display:inline-flex;align-items:center;font-size:12px;font-weight:800;border-radius:7px;padding:5px 11px;cursor:pointer;min-height:30px;}
+  .tchip.t1{background:var(--t1-bg);color:var(--t1-fg);} .tchip.t2{background:var(--t2-bg);color:var(--t2-fg);}
+  .tchip.t3{background:var(--t3-bg);color:var(--t3-fg);} .tchip.t4{background:var(--t4-bg);color:var(--t4-fg);}
+  .tchip.t0{background:#f3efe6;color:#8a7d63;}
+  .tchip.on{box-shadow:inset 0 0 0 2px currentColor;}
+  .tchip.ed-t{font-size:13px;padding:8px 6px;min-height:36px;}   /* 編輯卡 tier 列：橫向 padding 收窄讓 5 顆 chip 在 375px 同列、未分不孤行（FIX5b）；仍大可點＋帶說明字、同色票家族 */
+  .triage{background:#fff7ea;border:1px solid #f0dcb8;border-radius:12px;padding:9px 11px;margin-bottom:12px;}
+  .triage .th{display:flex;align-items:center;font-size:12.5px;font-weight:800;color:#8a5a12;cursor:pointer;}
+  .triage .th .tg{margin-left:auto;font-size:11px;font-weight:600;color:#b9802f;}
+  .triage .ti{display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap;}
+  .triage .ti .nm{font-size:13px;font-weight:600;color:#5a4a2a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:42%;}
+  .triage .ti .tset{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap;}
+  .triage .ti .skip{font-size:11px;color:#a08e6a;border:1px solid #e0d4ba;border-radius:6px;padding:3px 8px;cursor:pointer;background:#fff;min-height:30px;display:inline-flex;align-items:center;}
+  .lib-empty{font-size:13px;color:#a59c8b;text-align:center;padding:28px 0;}
+
+  /* ── 並看模式（Task 17 §4.13）：上半粗流摘要/細排 mini＋分隔線＋下半庫列表 ── */
+  #ribbonMini{display:none;}
+  #splitbar{display:none;}
+  @media(max-width:1099px){
+    #pg-lib.split{display:flex;flex-direction:column;height:calc(100vh - 84px);padding:0;overflow:hidden;}   /* 扣 header 46＋收合中地圖軌條 38 */
+    #pg-lib.split #ribbonMini{display:block;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 4px;flex:none;height:45vh;}   /* 預設對半（拖曳改 inline height 30–70vh）；libBody flex:1 補滿其餘 */
+    #pg-lib.split.searching #ribbonMini,#pg-lib.split.searching #splitbar{display:none;}
+    #pg-lib.split #splitbar{display:flex;align-items:center;justify-content:center;height:16px;flex:none;background:#e7e0d2;border-top:1px solid #d8d0c2;border-bottom:1px solid #d8d0c2;cursor:row-resize;touch-action:none;}
+    #pg-lib.split #splitbar span{width:42px;height:4px;border-radius:2px;background:#b9ad97;}
+    #pg-lib.split #libBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px;min-height:0;}
+  }
+  /* 並看 mini 粗流：.rb-node 是 left:-30px（相對 .rb-day）→ 內層需 padding-left:30px 讓日號圓點不被切（外層 #ribbonMini 只有 12px）。詳排視圖(.day-exp)無 rb-node，不受影響。 */
+  #ribbon-mini-rib{padding-left:30px;position:relative;}
+  #ribbonMini .rm-back{font-size:12px;color:#6b6356;background:#fff;border:1px solid #e2d9c8;border-radius:8px;padding:4px 10px;display:inline-block;margin-bottom:8px;cursor:pointer;}
+  #ribbonMini .rm-hint{font-size:11px;color:#a59c8b;margin-bottom:6px;}
+
+  .overlay{position:fixed;inset:0;background:rgba(40,36,30,.45);z-index:1300;display:none;align-items:flex-end;justify-content:center;}
+  body.sheet-open{overflow:hidden;}   /* 彈窗開著時鎖背景捲動：手機才會動到（桌機 body 本就 grid+overflow:hidden）；修 Vivian #2「往下滑往上滑彈窗被 header 擋住、關不掉」 */
+  .overlay.on{display:flex;}
+  .sheet{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:16px;max-height:67vh;overflow:auto;position:relative;}
+  .sheetclose{position:absolute;top:12px;right:12px;border:1px solid #e0d8c8;background:#fff;color:#8a8276;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit;z-index:2;}
+  @media(min-width:560px){ .overlay{align-items:center;} .sheet{border-radius:16px;} }
+  /* 桌機（≥1100px，spec §4.12）：彈窗 sheet 改「右側固定面板」（非底部 sheet）。body 前綴提高特異度，勝過後續無條件的 .sheet.sheet-picker 高度規則 */
+  @media(min-width:1100px){
+    body .overlay{align-items:stretch;justify-content:flex-end;background:transparent;pointer-events:none;}   /* 背景不暗化、不擋三欄；panel 自身接事件 */
+    body .overlay.on .sheet{pointer-events:auto;}
+    body .sheet{width:380px;max-width:380px;height:100vh;max-height:100vh;border-radius:0;border-left:1px solid var(--line);box-shadow:-6px 0 22px rgba(40,36,30,.16);}
+    body .sheet.sheet-picker,body .sheet.sheet-picker.tall,body .sheet.tall{height:100vh;max-height:100vh;}    /* 挑選器/設定頁右欄滿高（覆寫半屏/82dvh） */
+    body .sheet .pk-handle{display:none;}                                               /* 桌機右欄不需拖曳把手 */
+  }
+  .sheet h3{margin:0 0 4px;font-size:16px;}
+  .sheet .subline{font-size:12px;color:var(--muted);margin-bottom:10px;}
+  .sheet .sd{font-size:12px;color:var(--muted);margin:-2px 0 12px;}
+  .seclabel{font-size:11px;color:#a59c8b;font-weight:600;margin:12px 0 5px;}
+  .seclabel .auto{font-size:11px;color:#8a9b6a;font-weight:700;margin-left:5px;}
+  .sheet input,.sheet textarea,.sheet select{width:100%;border:1px solid #d8d0c2;border-radius:8px;padding:9px 11px;margin-bottom:8px;font-family:inherit;background:#fff;}
+  .iconrow{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .iconrow .nm{flex:1;font-size:14px;} .iconrow input.em{width:58px;text-align:center;font-size:20px;margin:0;} .iconrow input[type=color]{width:44px;height:38px;padding:2px;margin:0;}
+  .iconpickbtn{font-size:12px;border:1px solid #d8d0c2;background:#fff;color:#6b6356;border-radius:8px;padding:0 11px;cursor:pointer;white-space:nowrap;font-family:inherit;flex:none;}
+  .emojipanel{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:0 0 10px;max-height:240px;overflow:auto;background:#fbf9f4;-webkit-overflow-scrolling:touch;}
+  .emojicat{font-size:11px;color:#a59c8b;font-weight:600;margin:9px 0 4px;} .emojicat:first-child{margin-top:0;}
+  .emojigrid{display:flex;flex-wrap:wrap;gap:4px;}
+  .emojibtn{font-size:18px;line-height:1;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;user-select:none;}
+  .emojibtn:hover{background:#efe8da;} .emojibtn.dflt{font-size:11px;color:#8a8276;padding:5px 9px;}
+  .sheet textarea.code{font-family:ui-monospace,Menlo,monospace;font-size:16px;line-height:1.5;min-height:180px;}
+  .sheet .row{display:flex;gap:7px;flex-wrap:wrap;}
+  .sheet .two{display:flex;gap:8px;} .sheet .two>div{flex:1;}
+  .pill{border:1px solid #d8d0c2;background:#fff;border-radius:9px;padding:7px 11px;font-size:12px;cursor:pointer;text-align:center;}
+  .pill.pri{background:#2e2a24;color:#fff;border-color:#2e2a24;}
+  /* 編輯卡：固定底部動作列 + 可捲動內容（mobile-first） */
+  .sheet.sheet-edit{display:flex;flex-direction:column;padding:0;overflow:hidden;}
+  .sheet.sheet-edit .edscroll{flex:1;overflow:auto;padding:16px 16px 6px;-webkit-overflow-scrolling:touch;}
+  .sheet.sheet-edit .edfoot{flex:none;display:flex;gap:8px;align-items:center;padding:10px 16px;padding-bottom:calc(10px + env(safe-area-inset-bottom));border-top:1px solid #ece3d2;background:#f7f2e8;}
+  .sheet-edit .edfoot .pill{font-size:15px;padding:11px 16px;border-radius:11px;font-weight:600;}
+  .sheet-edit .edfoot .pill.save{flex:1.3;background:#2e9e7d;color:#fff;border-color:#2e9e7d;font-weight:700;}
+  .sheet-edit .edfoot .pill.cancel{flex:1;}
+  .sheet-edit .edfoot .pill.del{flex:none;color:#c0392b;border-color:#ecd3cf;padding:11px 13px;}
+  .sheet-edit .chip{font-size:14px;padding:8px 13px;border-radius:9px;min-height:36px;display:inline-flex;align-items:center;}   /* 編輯卡膠囊：對齊 .fchip 尺寸（≥36px、圓角 9）一致觸控 */
+  /* ── 檢視卡（detailSheet）：瘦身六區塊＋矮小動作列（Task 16） ── */
+  .vcard h3{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:17px;margin:2px 0 0;}
+  .vcard .vmemo{font-size:13px;color:#6b6356;margin:8px 0 2px;line-height:1.5;}
+  .vcard .vfacts{font-size:12px;color:#8a7d63;margin:6px 0;line-height:1.5;}
+  .vcard .vtags{margin:7px 0 2px;}
+  .vcard .vcui{display:inline-block;font-size:11px;background:#f0ead9;color:#7c6f53;border-radius:6px;padding:3px 9px;}
+  .vcard .vsched{font-size:12px;color:#2e7d4f;margin:9px 0 11px;}
+  .vcard .vsched.none{color:#a59c8b;}
+  .vcard .vacts{display:flex;gap:7px;flex-wrap:wrap;}
+  .vcard .pill{padding:4px 9px;font-size:12px;}
+  .vcard .pill.pri{background:#2e2a24;color:#fff;border-color:#2e2a24;}
+  /* ── 統一篩選膠囊 .fchip（一套設計語言：挑選器篩選＋庫膠囊就地展開＋編輯卡共用）──
+     off＝白底細框淡墨字；on＝實心墨底白字。圓角 9／內距 7×13／字 13px → 高度 ≥36px（達觸控門檻） */
+  .fchip{display:inline-flex;align-items:center;justify-content:center;min-height:36px;border:1px solid #d8cdb8;background:#fff;border-radius:9px;padding:7px 13px;font-size:13px;line-height:1;color:#6b6356;cursor:pointer;font-family:inherit;white-space:nowrap;transition:background .12s,border-color .12s,color .12s;}
+  .fchip.on{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:600;}
+  .fchip:active{transform:scale(.97);}
+
+  /* ── 挑選器（openPicker）：半屏可拖 sheet（Task 13），重設計：精簡頭部／動作分離／篩選可收分組／列左對齊 ── */
+  .sheet.sheet-picker{max-height:82dvh;}            /* 內容撐高、最多 82dvh（dvh 避 iOS 動態工具列把彈窗頂推到 header 後）；不再固定 85vh 滿版（Vivian #2 矯枉過正） */
+  .sheet.sheet-picker.tall{max-height:82dvh;}
+  .sheet.tall{max-height:82dvh;}                    /* 設定頁（非 picker）也撐高，否則只有預設 67vh、列多要捲（code review #1） */
+  /* .pk2＝重設計版（openPicker）；openAssign 仍用 .sheet-picker 的高度但維持原本 padding/捲動，不套下列 flex 版面 */
+  .sheet.sheet-picker.pk2{display:flex;flex-direction:column;padding:14px 16px 0;overflow:hidden;}
+  .pk-handle{width:40px;height:4px;border-radius:2px;background:#d8cdb8;margin:0 auto 8px;cursor:grab;flex:none;}
+  .pk-head{flex:none;}
+  .pk-head h3{margin:0;font-size:16px;display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;padding-right:54px;}   /* 右留白：標題不鑽到右上「關閉」鈕下 */
+  .pk-head h3 .pk-sub-t{font-size:12px;font-weight:400;color:var(--muted);}
+  /* 動作分離：細灰列、文字型按鈕，明顯「不是篩選膠囊」 */
+  .pk-acts{display:flex;align-items:center;gap:14px;margin:7px 0 2px;font-size:13px;flex-wrap:wrap;}
+  .pk-acts .pa{display:inline-flex;align-items:center;gap:4px;color:#7c7466;cursor:pointer;min-height:30px;}
+  .pk-acts .pa:active{color:var(--ink);}
+  /* 距離基準：一行、淡、只在有意義時出現 */
+  .pk-dist{font-size:11.5px;color:#a59c8b;margin:5px 0 0;display:flex;align-items:center;gap:5px;line-height:1.3;}
+  .pk-dist .ar{color:#c4b79c;}
+  /* 搜尋框：上下留白與卡片同節奏 */
+  .pk-search{flex:none;width:100%;border:1px solid #e2d9c8;border-radius:10px;padding:9px 12px;font-size:16px;background:#fff;margin:9px 0 0;}
+  /* 篩選 ▾ 收合鈕：預設收起，列表乾淨 */
+  .pk-ftoggle{flex:none;display:inline-flex;align-items:center;gap:6px;align-self:flex-start;margin:9px 0 0;border:1px solid #e2d9c8;background:#fbf8f1;color:#6b6356;border-radius:9px;padding:7px 12px;font-size:13px;cursor:pointer;font-family:inherit;min-height:34px;}
+  .pk-ftoggle .car{font-size:11px;color:#a59c8b;transition:transform .15s;}
+  .pk-ftoggle.open .car{transform:rotate(180deg);}
+  .pk-ftoggle .cnt{background:var(--ink);color:#fff;border-radius:7px;font-size:11px;font-weight:700;padding:1px 7px;line-height:1.5;}
+  /* 分組篩選面板：三條帶左側軸標的列 */
+  .pk-filters{flex:none;margin:8px 0 2px;}
+  .pk-frow{display:flex;align-items:center;gap:9px;margin-bottom:7px;}
+  .pk-frow:last-child{margin-bottom:0;}
+  .pk-frow .ax{flex:none;width:34px;font-size:11px;font-weight:700;color:#a59c8b;text-align:right;}
+  .pk-frow .fset{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0;}
+  /* 列表區：占主要空間、可捲 */
+  .pk-list{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:9px;padding-bottom:env(safe-area-inset-bottom);min-height:0;}
+  .pk-sec{font-size:12px;font-weight:800;color:#6b6356;margin:11px 0 5px;}
+  .pk-sec:first-child{margin-top:2px;}
+  .pk-sub{font-size:11px;font-weight:700;color:#8a9b6a;margin:7px 0 5px;}
+  /* 列：左對齊、可掃描；line1＝[⚠️前置][Tier]emoji 名稱；line2＝左對齊單行 meta（省略號） */
+  .pk-row{background:#fff;border-radius:10px;padding:8px 11px;margin-bottom:6px;box-shadow:inset 0 0 0 1px #ece3d2;cursor:pointer;}
+  .pk-row .l1{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:var(--ink);min-width:0;}
+  .pk-row .l1 .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+  .pk-row .warn{flex:none;font-size:11px;font-weight:800;color:#fff;background:#c0392b;border-radius:5px;padding:2px 6px;}
+  .pk-row .meta{font-size:11.5px;color:#a59c8b;margin-top:3px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pk-row.sch{opacity:.82;}
+  .pk-empty{font-size:12.5px;color:#a59c8b;text-align:center;padding:18px 0;}
+  /* ── 快速排入面板（openAssign）：空格壓縮／🎯推薦／占用三選一（Task 14） ── */
+  .qa-reco{background:#2e2a24;border-radius:11px;padding:9px 11px;margin:4px 0 10px;}
+  .qa-reco .rt{font-size:12px;font-weight:800;color:#f6e9c9;margin-bottom:6px;}
+  .qa-reco .rc{display:inline-flex;align-items:center;gap:6px;min-height:40px;background:#fff;border-radius:9px;padding:6px 11px;margin:0 6px 4px 0;font-size:14px;color:#2e2a24;cursor:pointer;}
+  .qa-reco .rc b{font-weight:800;}
+  .qa-reco .rc .d{color:#8a9b6a;font-weight:700;font-size:12px;}
+  .qa-day{background:#fff;border-radius:12px;padding:9px 11px;margin-bottom:8px;box-shadow:inset 0 0 0 1px #ece3d2;}
+  .qa-day.same{box-shadow:inset 0 0 0 2px #e8a13a;}
+  .qa-day.closed{opacity:.62;}
+  .qa-day .dh{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#4d4636;margin-bottom:5px;flex-wrap:wrap;}
+  .qa-day .dot{width:22px;height:22px;border-radius:50%;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex:none;}
+  .qa-day .same-tag{font-size:11px;background:#fdf3e0;color:#b9802f;border-radius:5px;padding:1px 5px;font-weight:700;}
+  .qa-day .info{font-size:11px;color:#8a9b6a;font-weight:700;}
+  .qa-anchor{display:flex;align-items:center;gap:6px;font-size:13px;color:#7c7466;background:#f6f1e4;border-radius:8px;padding:8px 10px;margin:4px 0;cursor:pointer;min-height:40px;box-sizing:border-box;}
+  .qa-anchor .tap{margin-left:auto;font-size:11px;color:#b9802f;font-weight:700;white-space:nowrap;flex:none;}
+  /* 候選列長店名截斷成 …（FIX3）：名字進 .nm flex:1 截斷、尾巴動作 flex:none 不被推到第二行——與其他清單一致單行高度 */
+  .qa-anchor .nm,.op .op-cand .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .qa-grp{margin:4px 0 7px;}
+  .qa-grp .chips{display:flex;flex-wrap:wrap;gap:6px;}
+  .qa-chip{display:inline-flex;align-items:center;min-height:40px;box-sizing:border-box;border:1px dashed #cbbfa8;border-radius:9px;padding:6px 13px;font-size:14px;color:#6b6356;font-weight:700;background:#fff;cursor:pointer;}
+  .qa-grp .dist{font-size:11px;color:#8a9b6a;margin-top:4px;font-weight:600;}
+  .sheet .opt{display:flex;align-items:flex-start;gap:8px;background:#faf7f0;border-radius:10px;padding:11px 12px;margin-bottom:7px;font-size:14px;cursor:pointer;box-shadow:inset 0 0 0 1px #ece3d2;}
+  .sheet .opt small{display:block;color:#a59c8b;font-size:12px;margin-top:2px;line-height:1.45;}
+  .sheet .opt.cancel{color:#a59c8b;justify-content:center;box-shadow:none;background:transparent;}
+  /* toast 復原鈕（只在 toast 顯示時可點，消失後不留幽靈點擊區） */
+  .toast .undo{margin-left:12px;color:#8fd0b6;font-weight:800;text-decoration:underline;cursor:pointer;pointer-events:none;}
+  .toast.on .undo{pointer-events:auto;}
+  /* 並看（⇅ 並看）粗流摘要列仍可點切換（rm-day）；主畫面原地手風琴已移除（切片 A→細看走 sheet） */
+  .rb-day .rb-items{cursor:pointer;}
+  /* ── 細看標題列（切片 A Phase 3）：sheet 內「N 日（週幾）· 區域」；右上關閉鈕由 openSheet 提供，故 padding-right 留位 ── */
+  .dt-head{display:flex;align-items:baseline;gap:7px;margin:2px 0 10px;padding-right:60px;}
+  .dt-head h3{margin:0;font-size:16px;}
+  .dt-head .dt-zone{font-size:12px;color:var(--muted);}
+  /* ── 細排（openDay）：時段列＋獨立卡列＋住宿列（Task 12） ── */
+  .day-exp .erow{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #efe7d7;}
+  .day-exp .erow:last-child{border-bottom:none;}
+  .day-exp .etl{flex:none;width:46px;font-size:11px;color:#8a8276;font-weight:700;padding-top:6px;}
+  .day-exp .etl.meal{color:#b98f3e;}
+  .day-exp .ec{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .day-exp .ditem{display:flex;align-items:center;gap:6px;background:#fff;border-radius:9px;padding:8px 10px;box-shadow:inset 0 0 0 1px #ece3d2;font-size:14px;cursor:pointer;}
+  .day-exp .ditem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .day-exp .ditem .dtime{margin-left:auto;font-size:12px;color:var(--muted);white-space:nowrap;flex:none;}
+  .day-exp .ditem.meal{background:#fff7ea;box-shadow:inset 0 0 0 1px #f0dcb8;}
+  .day-exp .fillrow{display:flex;gap:5px;align-items:stretch;}
+  .day-exp .fillitems{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .day-exp .dadd-mini{display:inline-flex;align-items:center;justify-content:center;width:32px;align-self:stretch;min-height:40px;border:1px dashed #d8cdb8;color:#b3a48a;border-radius:9px;font-size:16px;cursor:pointer;flex:none;}
+  .day-exp .dadd{border:1px dashed #d8cdb8;color:#a8997f;border-radius:9px;padding:9px;font-size:14px;text-align:center;cursor:pointer;}
+  .day-exp .tentrow{background:#fdf3df;border:1px dashed #e3c98e;color:#9a7b2e;border-radius:9px;padding:8px 10px;font-size:12px;cursor:pointer;}
+  .day-exp .stayrow{background:#eef2f8;border-radius:9px;padding:8px 10px;font-size:14px;color:#3f648c;display:flex;align-items:center;gap:6px;}
+  .day-exp .stayrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .day-exp .stayrow .chg{font-size:11px;background:#fff;border:1px solid #cdd9e8;border-radius:7px;padding:5px 10px;cursor:pointer;white-space:nowrap;flex:none;}
+  .ed-hide{display:flex;align-items:center;gap:8px;font-size:14px;color:#5a5145;background:#f4efe4;border:1px solid #e7ddc9;border-radius:10px;padding:11px;margin-top:13px;cursor:pointer;}
+  .ed-hide input{width:18px;height:18px;flex:none;accent-color:#5a5145;}
+  .edloc-input{display:flex;gap:7px;align-items:stretch;}
+  .edloc-input input{margin-bottom:0;}
+  .edloc-input .pill{flex:none;white-space:nowrap;}
+  .pill.danger{color:#c0392b;border-color:#e3b4ad;}
+  .tinytool{font-size:11px;color:#b0a692;cursor:pointer;}
+  /* ── 預算（renderBudget，切片A #7）：類別表＋手動花費列共用一套卡/列＋右對齊金額欄，375/桌機不溢出 ── */
+  .bd-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+  .bd-big{flex:1;min-width:140px;background:#fff;border-radius:12px;padding:12px 14px;box-shadow:inset 0 0 0 1px var(--line);}
+  .bd-big .lab{font-size:11px;color:#a59c8b;font-weight:600;}
+  .bd-big .val{font-size:20px;font-weight:700;margin-top:3px;}
+  .bd-card{background:#fff;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line);overflow:hidden;}
+  .bd-row{display:flex;align-items:center;padding:9px 12px;font-size:13px;border-bottom:1px solid #f6f2ea;}
+  .bd-row:last-child{border-bottom:none;}
+  .bd-row.head{font-size:11px;color:#a59c8b;font-weight:600;padding:8px 12px;border-bottom:1px solid #f0ebe0;}
+  .bd-row.cat{cursor:pointer;}
+  .bd-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px;}
+  .bd-name .sub{font-size:11px;color:#b3a994;}
+  .bd-num{width:96px;flex:none;text-align:right;padding-left:8px;}   /* 加寬＋左 padding：5 位數金額(NT$ 72,000)不與鄰欄相撞、欄間有間隙 */
+  .bd-items{padding:0 12px 8px;}
+  .bd-item{display:flex;font-size:12px;color:#6b6356;padding:3px 0;border-left:2px solid #f0e2c8;padding-left:8px;}
+  .bd-item .bd-name .ctx{color:#b3a994;}
+  .bd-empty{font-size:11px;color:#b3a994;padding:3px 0 6px;}
+  .bd-manual{display:flex;align-items:center;background:#fff;border-radius:9px;padding:8px 12px;box-shadow:inset 0 0 0 1px var(--line);font-size:13px;margin-bottom:6px;}
+  .bd-manual .bd-num{width:96px;color:#8a8276;}
+  @media(max-width:380px){ .bd-num{width:88px;} .bd-manual .bd-num{width:96px;} }
+  /* ── 已排項目面板（openOccPanel，換將中心＋2選1裁決，Task 15） ── */
+  .op>.t1{font-size:14px;font-weight:800;display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding-right:64px;}   /* 直屬子選擇器：標題列 .t1，不誤套到巢狀的 .tbadge.t1 tier 徽章（修 padding-right:64px 漏到徽章變 85px）（FIX3） */
+  .op>.t1 .op-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .op>.t1 .when{font-size:11px;color:#8a7d63;font-weight:700;flex:none;white-space:nowrap;}
+  .op .facts{font-size:12px;color:#a59c8b;margin:4px 0 11px;line-height:1.5;}
+  .op .op-big{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:11px;}
+  .op .op-big span{background:#fff;border-radius:11px;padding:13px 6px;text-align:center;font-size:14px;font-weight:700;box-shadow:inset 0 0 0 1px #ece3d2;cursor:pointer;}
+  .op .op-big .danger{color:#b54545;}
+  .op .op-seclab{font-size:11px;font-weight:800;color:#b9802f;letter-spacing:.5px;margin:11px 0 6px;}
+  .op .op-cand{display:flex;align-items:center;gap:6px;background:#fff;border-radius:10px;padding:8px 10px;font-size:14px;margin-bottom:5px;box-shadow:inset 0 0 0 1px #ece3d2;}
+  .op .op-cand .meta{font-size:11px;color:#a59c8b;margin-left:2px;flex:none;white-space:nowrap;}
+  .op .op-cand .swap{margin-left:auto;font-size:12px;font-weight:700;background:#2e2a24;color:#fff;border-radius:7px;padding:7px 11px;white-space:nowrap;cursor:pointer;flex:none;}
+  .op .op-cand.bak{background:#fdf8ec;box-shadow:inset 0 0 0 1px #ecd9b0;}
+  .op .op-cand .bktag{font-size:11px;font-weight:800;color:#b9802f;background:#fdf3e0;border-radius:5px;padding:1px 4px;flex:none;}
+  .op .op-cand .bkdel{font-size:13px;color:#b09a72;padding:6px 8px;margin-left:2px;cursor:pointer;flex:none;}
+  .op .op-addbak{border:1px dashed #cbbfa8;border-radius:10px;padding:10px;text-align:center;font-size:12px;color:#8a7d63;margin-bottom:5px;cursor:pointer;}
+  .op .op-minor{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px;padding-top:9px;border-top:1px solid #e7e0d2;}
+  .op .op-minor span,.op .op-minor a{font-size:12px;border:1px solid #d8cdb8;border-radius:8px;padding:7px 10px;color:#6b6356;background:#fff;cursor:pointer;text-decoration:none;white-space:nowrap;}
+  .op .sd{font-size:12px;color:#a59c8b;margin:2px 0 6px;}
+
+  /* ── 設定管理頁（Task 14）：四分頁籤殼＋行列樣式（內容 Task 15-18 填入） ── */
+  .cfg-tabs{display:flex;gap:6px;margin:8px 0 10px;border-bottom:1px solid var(--line)}
+  .cfg-tab{padding:7px 12px;font-size:14px;font-weight:700;color:#8a8170;cursor:pointer;border-bottom:2px solid transparent}
+  .cfg-tab.on{color:var(--ink);border-bottom-color:#c8623e}
+  .cfg-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0ece3}
+  .cfg-row input[type=text]{flex:1;min-width:0;font-size:16px;padding:6px 8px;border:1px solid var(--line);border-radius:7px}
+  .cfg-row input[type=color]{width:30px;height:30px;border:none;background:none;flex:none;padding:0}
+  .cfg-row input.num{width:84px;flex:none;font-size:16px;padding:6px 8px;border:1px solid var(--line);border-radius:7px}
+  .cfg-row .mv,.cfg-row .del{flex:none;cursor:pointer;font-size:15px;color:#a59c8b;padding:2px 5px}
+  .cfg-row .del.lock{opacity:.3;cursor:not-allowed}
+  .cfg-add{margin-top:10px;display:inline-block;font-size:14px;font-weight:700;color:#c8623e;cursor:pointer}
+  .cfg-role{flex:none;font-size:11px;color:#a59c8b}
