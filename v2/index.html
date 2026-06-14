@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐘</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="core.js?v=26"></script>
+<script src="core.js?v=27"></script>
 <script src="sync.js?v=22"></script>
 <link rel="stylesheet" href="styles.css?v=35">
 </head>
@@ -33,7 +33,7 @@
     <div id="ribbonMini"></div>
     <div id="splitbar"><span></span></div>
     <div id="libBody">
-      <div class="lib-search"><input id="libSearch" placeholder="🔍 搜店名／memo"><span class="add" data-action="lib-new">🔗 ＋新增</span><span class="add" id="splitBtn" data-action="lib-split">⇅ 粗流</span></div>
+      <div class="lib-search"><input id="libSearch" placeholder="🔍 搜店名／memo"><span class="add" data-action="lib-link">🔗 貼連結</span><span class="add" data-action="lib-new">＋新增</span><span class="add" id="splitBtn" data-action="lib-split">⇅ 粗流</span></div>
       <div class="caps" id="libCaps"></div>
       <div class="capnel" id="libCapPanel" hidden></div>
       <div id="triageStrip"></div>
@@ -48,6 +48,6 @@
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="app.js?v=37"></script>
+<script src="app.js?v=38"></script>
 </body>
 </html>

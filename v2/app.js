@@ -638,11 +638,13 @@ function detailSheet(id){
 
 let pendingAddTarget=null;   // {day,slot}：從挑選器🔗新增時，存檔後自動排進該格（Task 13；Task 16 沿用）
 let pendingHotelDay=null;    // dayId：從住宿列「建新飯店」新增時，存檔後設為該 base 段 hotelPlaceId（切片A #6）
-function openEdit(id,addTarget){
+let pendingPrefill=null;     // 貼連結建卡：解析結果裡「無表單欄位」的 lat/lng/placeId/cid，save-edit 新卡時注入（切片2 Task4）
+function openEdit(id,addTarget,prefill){
   pendingAddTarget=(addTarget&&addTarget.day&&addTarget.slot)?{day:addTarget.day,slot:addTarget.slot}:null;
   pendingHotelDay=(addTarget&&addTarget.hotelDay)?addTarget.hotelDay:null;
-  const isNew=!id; const p=isNew?CNXCore.normalizePlace({type:'其他'}):getPlace(id);
-  const nameVal=isNew?'':p.name;
+  pendingPrefill=(!id&&prefill)?prefill:null;
+  const isNew=!id; const p=isNew?CNXCore.normalizePlace(prefill||{type:'其他'}):getPlace(id);
+  const nameVal=isNew?((prefill&&prefill.name)||''):p.name;
   const cuisines=(TRIP.cuisinesList||[]);
   const curCui=p.cuisine||null;
   const body=`<h3>${isNew?'新增地點':'編輯卡片'}</h3>
@@ -668,6 +670,47 @@ function openEdit(id,addTarget){
   openSheet(`<div class="edscroll">${body}</div>${foot}`);
   sh.classList.add('sheet-edit');
   sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tier=(p.tier?String(p.tier):''); sh.dataset.cui=(curCui||'');
+}
+
+// ── 貼連結建卡（切片2 Task5）：Edge Function 解析→去重→預填 openEdit ──
+const RESOLVE_URL = (SYNC_URL && SYNC_ANON) ? (SYNC_URL+'/functions/v1/resolve-place') : '';
+let pendingResolve=null;   // 去重「仍建新卡」時暫存解析結果
+
+function openLinkPrompt(addTarget){
+  openSheet(`<h3>🔗 貼連結建卡</h3>
+    <div class="sd">貼 Google Maps 連結（手機分享的短連結也可以），自動解析建卡。</div>
+    <input id="lnk_url" placeholder="https://maps.app.goo.gl/… 或長連結" style="margin-bottom:10px">
+    <div class="row"><span class="pill pri" data-action="lnk-go"${addTarget?` data-day="${esc(addTarget.day)}" data-slot="${esc(addTarget.slot)}"`:''}>建卡</span></div>`);
+  setTimeout(()=>{ const el=document.getElementById('lnk_url'); if(el) el.focus(); },50);
+}
+
+async function resolveAndCreate(url, addTarget){
+  url=(url||'').trim();
+  if(!url) return;
+  if(!RESOLVE_URL){ toast('未設定解析服務，先手動建卡'); openEdit(null,addTarget,{mapsUrl:url}); return; }
+  toast('解析連結中…');
+  let data=null;
+  try{
+    const r=await fetch(RESOLVE_URL,{method:'POST',headers:{'content-type':'application/json','apikey':SYNC_ANON,'Authorization':'Bearer '+SYNC_ANON},body:JSON.stringify({url})});
+    data=await r.json();
+  }catch(_){ data=null; }
+  if(!data||!data.ok){ toast('解不出來，手動補一下'); openEdit(null,addTarget,{mapsUrl:url}); return; }
+  const dup=CNXCore.findDuplicate(places,{placeId:data.placeId,cid:data.cid,lat:data.lat,lng:data.lng});
+  if(dup){ promptDuplicate(dup,data,addTarget); return; }
+  openEdit(null,addTarget,{name:data.name||'',lat:data.lat,lng:data.lng,mapsUrl:url,hours:data.hours||'',placeId:data.placeId,cid:data.cid});
+  if(data.degraded) toast('解不出店名，手動補一下');
+}
+
+function promptDuplicate(dup,data,addTarget){
+  pendingResolve={data,addTarget};
+  const canLocate=(dup.lat==null||dup.lng==null||!dup.placeId)&&(data.lat!=null);
+  openSheet(`<h3>這家好像已經有卡了</h3>
+    <div class="sd">既有：${esc(dup.icon||temoji(dup.type))} ${esc(dup.name)}</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <span class="pill pri" data-action="dup-open" data-id="${esc(dup.id)}">開既有卡</span>
+      ${canLocate?`<span class="pill" data-action="dup-locate" data-id="${esc(dup.id)}">補定位到它</span>`:''}
+      <span class="pill" data-action="dup-new">仍建新卡</span>
+    </div>`);
 }
 
 function openImpExp(){
@@ -797,7 +840,7 @@ document.addEventListener('click',e=>{
   if(a==='pk-grow'){ sh.classList.toggle('tall'); return; }                  // 把手：半屏⇄2/3
   if(a==='pk-togglesch'){ const box=t.nextElementSibling; if(box&&box.classList.contains('pkSch')){ const open=box.style.display!=='none'; box.style.display=open?'none':'block'; t.textContent=t.textContent.replace(open?'▾':'▸', open?'▸':'▾'); } return; }
   if(a==='pk-tent'){ const s=sh.dataset; CNXCore.setSlotFlag(av(), s.pkDay, s.pkSlot, 'tentative', true); afterChange(); closeSheet(); toast('已標待定'); return; }
-  if(a==='pk-newlink'){ const s=sh.dataset; openEdit(null,{day:s.pkDay,slot:s.pkSlot}); return; }   // 新編輯卡，存檔後排進該格
+  if(a==='pk-newlink'){ const s=sh.dataset; openLinkPrompt({day:s.pkDay,slot:s.pkSlot}); return; }   // 貼連結建卡，存檔後排進該格（切片2）
   if(a==='pk-near'){ const s=sh.dataset, seg=CNXCore.baseForDay(base,s.pkDay)||{};   // 收 sheet、開地圖、亮當日基地區的候選
     const ids=places.filter(p=>p.lat&&p.lng&&nearSeg(p,seg)&&CNXCore.passLibFilters(p,{types:pkFilters.types,areas:new Set(),tiers:new Set(),bands:pkFilters.bands,cuisines:pkFilters.cuisines,slots:pkFilters.slots,sched:'all'},{plan,bands:TRIP.priceBands})).map(p=>p.id);
     closeSheet(); mapSpotlightSet(ids); return; }
@@ -921,14 +964,15 @@ document.addEventListener('click',e=>{
         target.lat=ll.lat; target.lng=ll.lng; return 'located';
       }
       return 'short'; };
-    if(t.dataset.id==='__new__'){ const np=makePlace({name:v('ed_name')||'未命名地點',icon,cuisine,type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),note:v('ed_note'),cost,tier:sh.dataset.tier?+sh.dataset.tier:null,hideInOverview:hide}); const lr=applyLink(np); places.push(np);
+    if(t.dataset.id==='__new__'){ const pf=pendingPrefill; pendingPrefill=null;
+      const np=makePlace(Object.assign({},pf||{},{name:v('ed_name')||'未命名地點',icon,cuisine,type:document.getElementById('ed_type').value,area:document.getElementById('ed_area').value,hours:v('ed_hours'),note:v('ed_note'),cost,tier:sh.dataset.tier?+sh.dataset.tier:null,hideInOverview:hide})); const lr=applyLink(np); places.push(np);
       const tgt=pendingAddTarget; pendingAddTarget=null;   // 從挑選器🔗新增：存檔後排進該格
       if(tgt) plan.push({id:uid(),placeId:np.id,day:tgt.day,slot:tgt.slot});
       const hd=pendingHotelDay; pendingHotelDay=null;       // 住宿列「建新飯店」：掛為該段 hotelPlaceId（切片A #6）
       if(hd){ const hseg=CNXCore.baseForDay(base,hd); if(hseg) hseg.hotelPlaceId=np.id; }
       afterChange(); closeSheet();
       if(lr==='invalid') toast('已新增「'+np.name+'」（連結需 http/https，未存）');
-      else if(lr==='short') toast('短連結已存，之後會自動補上定位');
+      else if(lr==='short'&&np.lat==null) toast('短連結已存，之後會自動補上定位');
       else toast(tgt?('已新增並排入「'+np.name+'」'):('已新增「'+np.name+'」'+(lr==='located'?'並定位':'')));
     }
     else { const p=getPlace(t.dataset.id); if(!p){ closeSheet(); toast('這張卡已不存在'); return; }   // 開著編輯卡時，另一台裝置/同步把這張刪了→p 為 undefined，存檔會 TypeError 卡住面板；防呆關閉
@@ -943,6 +987,15 @@ document.addEventListener('click',e=>{
       afterChange(); closeSheet(); } return; }
   // ── 庫頁膠囊／triage／快標 tier（Task 17）handlers ──
   if(a==='lib-new'){ openEdit(null); return; }
+  if(a==='lib-link'){ openLinkPrompt(null); return; }   // 貼連結建卡（切片2）
+  if(a==='lnk-go'){ const el=document.getElementById('lnk_url'); const url=el?el.value:''; const at=(t.dataset.day&&t.dataset.slot)?{day:t.dataset.day,slot:t.dataset.slot}:null; resolveAndCreate(url,at); return; }
+  if(a==='dup-open'){ pendingResolve=null; openEdit(t.dataset.id); return; }
+  if(a==='dup-new'){ const pr=pendingResolve; pendingResolve=null; if(!pr){ closeSheet(); return; } const d=pr.data; openEdit(null,pr.addTarget,{name:d.name||'',lat:d.lat,lng:d.lng,mapsUrl:d.mapsUrl,hours:d.hours||'',placeId:d.placeId,cid:d.cid}); return; }
+  if(a==='dup-locate'){ const pr=pendingResolve; pendingResolve=null; const p=getPlace(t.dataset.id); if(!p||!pr){ closeSheet(); return; } const d=pr.data;
+    if(typeof d.lat==='number') p.lat=d.lat; if(typeof d.lng==='number') p.lng=d.lng;
+    if(d.placeId&&!p.placeId) p.placeId=d.placeId; if(d.cid&&!p.cid) p.cid=d.cid;
+    if(d.mapsUrl&&!p.mapsUrl) p.mapsUrl=d.mapsUrl; if(d.hours&&!p.hours){ p.hours=d.hours; CNXCore.applyHoursDerived(p); }
+    afterChange(); closeSheet(); toast('已補定位到「'+p.name+'」'); return; }
   if(a==='lib-split'){ if(pgLib.classList.contains('split')) exitSplit(); else enterSplit(); return; }
   if(a==='rm-day'){ miniDay=t.dataset.day; renderMiniTop(); return; }      // 並看上半：點某天→切該天細排 mini
   if(a==='rm-back'){ miniDay=null; renderMiniTop(); return; }              // ‹ 回粗流
