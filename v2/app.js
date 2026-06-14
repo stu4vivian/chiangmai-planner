@@ -684,6 +684,22 @@ function openLinkPrompt(addTarget){
   setTimeout(()=>{ const el=document.getElementById('lnk_url'); if(el) el.focus(); },50);
 }
 
+// Google Places primaryType → 你的類別 key（對不到回 undefined＝落「其他」由你選）。
+function placesTypeToCat(t){
+  if(!t) return undefined;
+  t=String(t).toLowerCase();
+  if(/restaurant|cafe|coffee|food|bakery|\bbar\b|bistro|diner|meal_|ice_cream|dessert|tea_house|noodle|steak|sushi|pub/.test(t)) return '食物';
+  if(/spa|massage|wellness|beauty|nail|night_club|karaoke/.test(t)) return '娛樂';
+  if(/tourist|temple|worship|museum|\bpark\b|gallery|landmark|monument|zoo|garden|viewpoint|historical|cultural|shrine/.test(t)) return '景點';
+  if(/shop|store|market|mall|boutique|supermarket/.test(t)) return '逛街';
+  if(/hotel|lodging|hostel|resort|guest_house|motel|bed_and_breakfast/.test(t)) return '住宿';
+  return undefined;
+}
+// 解析結果→預填卡（含座標自動判最近地區、Google 分類自動判類型）。resolveAndCreate 與 dup-new 共用。
+function resolvedPrefill(d, url){
+  return {name:d.name||'',lat:d.lat,lng:d.lng,mapsUrl:url||d.mapsUrl,hours:d.hours||'',placeId:d.placeId,cid:d.cid,
+    area:CNXCore.nearestRegion(TRIP,d.lat,d.lng)||undefined, type:placesTypeToCat(d.primaryType)};
+}
 async function resolveAndCreate(url, addTarget){
   url=(url||'').trim();
   if(!url) return;
@@ -695,9 +711,9 @@ async function resolveAndCreate(url, addTarget){
     data=await r.json();
   }catch(_){ data=null; }
   if(!data||!data.ok){ toast('解不出來，手動補一下'); openEdit(null,addTarget,{mapsUrl:url}); return; }
-  const dup=CNXCore.findDuplicate(places,{placeId:data.placeId,cid:data.cid,lat:data.lat,lng:data.lng});
+  const dup=CNXCore.findDuplicate(places,{placeId:data.placeId,cid:data.cid,lat:data.lat,lng:data.lng,name:data.name});
   if(dup){ promptDuplicate(dup,data,addTarget); return; }
-  openEdit(null,addTarget,{name:data.name||'',lat:data.lat,lng:data.lng,mapsUrl:url,hours:data.hours||'',placeId:data.placeId,cid:data.cid});
+  openEdit(null,addTarget,resolvedPrefill(data,url));
   if(data.degraded) toast('解不出店名，手動補一下');
 }
 
@@ -990,7 +1006,7 @@ document.addEventListener('click',e=>{
   if(a==='lib-link'){ openLinkPrompt(null); return; }   // 貼連結建卡（切片2）
   if(a==='lnk-go'){ const el=document.getElementById('lnk_url'); const url=el?el.value:''; const at=(t.dataset.day&&t.dataset.slot)?{day:t.dataset.day,slot:t.dataset.slot}:null; resolveAndCreate(url,at); return; }
   if(a==='dup-open'){ pendingResolve=null; openEdit(t.dataset.id); return; }
-  if(a==='dup-new'){ const pr=pendingResolve; pendingResolve=null; if(!pr){ closeSheet(); return; } const d=pr.data; openEdit(null,pr.addTarget,{name:d.name||'',lat:d.lat,lng:d.lng,mapsUrl:d.mapsUrl,hours:d.hours||'',placeId:d.placeId,cid:d.cid}); return; }
+  if(a==='dup-new'){ const pr=pendingResolve; pendingResolve=null; if(!pr){ closeSheet(); return; } openEdit(null,pr.addTarget,resolvedPrefill(pr.data)); return; }
   if(a==='dup-locate'){ const pr=pendingResolve; pendingResolve=null; const p=getPlace(t.dataset.id); if(!p||!pr){ closeSheet(); return; } const d=pr.data;
     if(typeof d.lat==='number') p.lat=d.lat; if(typeof d.lng==='number') p.lng=d.lng;
     if(d.placeId&&!p.placeId) p.placeId=d.placeId; if(d.cid&&!p.cid) p.cid=d.cid;

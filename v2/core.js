@@ -782,7 +782,14 @@
       Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
     return Math.round(2 * R * Math.asin(Math.sqrt(s)));
   }
-  // 在現有卡片裡找「同一家店」：placeId 全等 ＞ cid 全等 ＞ 座標 <DUP_M。命中回該 place，無回 null。
+  // 店名正規化＋相似：去空白/標點、小寫後，一方包含另一方（較短者 ≥2 字元）。中英泰文都吃。
+  function dupNameKey(s) { return String(s == null ? '' : s).toLowerCase().replace(/[\s　.,\-_\/&()'"，。、·！？!?：:；;]+/g, ''); }
+  function dupNameSimilar(a, b) {
+    a = dupNameKey(a); b = dupNameKey(b);
+    if (a.length < 2 || b.length < 2) return false;
+    return a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
+  }
+  // 在現有卡片裡找「同一家店」：placeId 全等 ＞ cid 全等 ＞ 座標兜底。命中回該 place，無回 null。
   var DUP_M = 60;
   function findDuplicate(places, anchor) {
     if (!Array.isArray(places) || !anchor) return null;
@@ -795,14 +802,31 @@
       var byCid = places.find(function (p) { return p && p.cid && p.cid === a.cid; });
       if (byCid) return byCid;
     }
+    // 座標兜底：只匹配「缺 placeId 的既有卡（未查證、可能要補定位）且 名字相似」。
+    // 有 placeId 的既有卡＝已確認的店，placeId 對不上就是不同店，不靠距離兜（清邁同街多店、40m 內常是不同家）。
     if (typeof a.lat === 'number' && typeof a.lng === 'number') {
       var near = places.find(function (p) {
-        return p && typeof p.lat === 'number' && typeof p.lng === 'number'
-          && distanceM(p, a) < DUP_M;
+        return p && !p.placeId
+          && typeof p.lat === 'number' && typeof p.lng === 'number'
+          && distanceM(p, a) < DUP_M
+          && dupNameSimilar(p.name, a.name);
       });
       if (near) return near;
     }
     return null;
+  }
+  // 座標→最近的有座標 region key（regions 的 lat/lng；都無座標或輸入無座標→null）。area 自動填用。
+  function nearestRegion(trip, lat, lng) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    var regs = (trip && trip.regions) || [];
+    var best = null, bestD = Infinity;
+    regs.forEach(function (r) {
+      if (r && typeof r.lat === 'number' && typeof r.lng === 'number') {
+        var d = distanceM({ lat: lat, lng: lng }, { lat: r.lat, lng: r.lng });
+        if (d < bestD) { bestD = d; best = r.key; }
+      }
+    });
+    return best;
   }
   function anchorsForSlot(plan, day, slot, slotKeys) {
     var idx = slotKeys.indexOf(slot), prev = null, next = null;
@@ -912,7 +936,7 @@
     return { old: old, demoted: demoted };
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;
