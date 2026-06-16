@@ -52,8 +52,9 @@
         return client.getTrip(tripId).then(function (row) {            // 衝突 → 拉遠端、合併、重試一次
           var merged = mergeDb(synced, local, row.data);
           applyDb(merged);
-          return client.saveTrip(tripId, merged, row.version).then(function (v2) {
-            if (v2 !== -1) { synced = clone(merged); syncedVersion = v2; onStatus('synced'); }
+          var mergedLocal = clone(getLocalDb());                       // 套用後快照（同 load 的紀律），衝突後 poll 才不會誤判 dirty
+          return client.saveTrip(tripId, mergedLocal, row.version).then(function (v2) {
+            if (v2 !== -1) { synced = mergedLocal; syncedVersion = v2; onStatus('synced'); }
             else { synced = clone(row.data); syncedVersion = row.version; scheduleSave(); } // 仍衝突 → 稍後再合併
           });
         });
@@ -89,5 +90,7 @@
     return { load: load, scheduleSave: scheduleSave, startPolling: startPolling, poll: poll };
   }
 
-  root.CNXSync = { makeClient: makeClient, createSyncController: createSyncController };
-})(window);
+  var api = { makeClient: makeClient, createSyncController: createSyncController };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;   // Node（測試）— 同 core.js 的雙環境收尾
+  else root.CNXSync = api;
+})(typeof self !== 'undefined' ? self : this);
