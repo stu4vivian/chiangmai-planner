@@ -52,6 +52,9 @@ let DB=load(), places=DB.places, manualLines=DB.manualLines, settings=DB.setting
 let TRIP=DB.trip, DAYS=CNXCore.deriveDays(TRIP);
 let plan, base, slotMetaArr;
 const AV_KEY=V2_ENV?'cnx-active-v-v2':'cnx-active-v';   // active 版本是每台裝置自己的（不進雲端文件）
+const OVMODE_KEY=V2_ENV?'cnx-ov-mode-v2':'cnx-ov-mode';   // 粗流顯示模式（per-device、不進雲端）；預設桌機 table、手機 matrix
+function ovMode(){ const m=localStorage.getItem(OVMODE_KEY); return (m==='table'||m==='matrix')?m:(isDesktop()?'table':'matrix'); }
+function setOvMode(m){ localStorage.setItem(OVMODE_KEY, m==='table'?'table':'matrix'); }
 function av(){ const id=localStorage.getItem(AV_KEY);
   return DB.versions.find(v=>v.id===id) || DB.versions[0]; }
 function setActiveLocal(id){ if(DB.versions.some(v=>v.id===id)){ localStorage.setItem(AV_KEY,id); syncActive(); } }
@@ -157,6 +160,7 @@ function updateDrawerUI(){
   drawer.classList.toggle('pinned',mapPinned); // Task 17 並看互斥／styling 用的 drawer 層 hook（刻意保留）
 }
 function openDrawer(){
+  if(document.body.classList.contains('split')) exitSplit();   // 並看與地圖抽屜互斥（手機#1：開地圖＝退出並看，不再兩個疊著沒處收）
   if(drawerOpen()){ updateDrawerUI(); return; }
   drawer.classList.remove('collapsed'); drawer.classList.add('expanded'); updateDrawerUI();
   initMap();
@@ -309,34 +313,7 @@ function renderLib(){
   el.innerHTML=list.length?list.map(libRow).join(''):'<div class="lib-empty">（沒有符合的卡片）</div>';
 }
 
-// ── 粗流時間軸（Task 11）：一天一行＝三餐錨點＋活動球；空餐錨點（A 案）直開挑選器 ──
-const MEAL_ANCHORS={breakfast:'早',lunch:'午',dinner:'晚'};
 function slotMetaOf(day,slot){ return slotMetaArr.find(m=>m.day===day&&m.slot===slot); }
-function rbActHTML(p,ctx){ return `<span class="rb-act"><span class="dot" style="background:${tcolor(p.type)}"></span>${ctx?`<span class="rb-ctx">${esc(ctx)}</span>`:''}${p.tier?tierBadge(p.tier):''}${placeEmoji(p)} <span class="rb-name">${esc(p.name)}</span></span>`; }
-function rbMealHTML(lab,p){ return `<span class="rb-meal"><span class="ml">${lab}</span>${p.tier?tierBadge(p.tier):''}${placeEmoji(p)} <span class="rb-name">${esc(p.name)}</span></span>`; }
-function ribbonDaysHTML(dayAction){   // 並看上半重用：整趟 11 天粗流摘要列；dayAction='rm-day' 點某天→並看上半切該天細排。（主畫面總覽已改 renderOverview，原地手風琴已移除）
-  return DAYS.map(d=>{
-    const seg=CNXCore.baseForDay(base,d.id)||{};
-    let inner='';
-    SLOTS.forEach(s=>{
-      if(s.kind==='stay') return;
-      const meta=slotMetaOf(d.id,s.key);
-      if(meta&&meta.pk) inner+=`<span class="rb-flag pk">2選1</span>`;           // 在該格項目前
-      if(meta&&meta.tentative) inner+=`<span class="rb-flag tent">⏳待定</span>`;
-      const entries=plan.filter(e=>e.day===d.id&&e.slot===s.key);
-      if(MEAL_ANCHORS[s.key]){
-        if(entries.length){ entries.forEach(e=>{ const p=getPlace(e.placeId); if(p) inner+=rbMealHTML(MEAL_ANCHORS[s.key],p); }); }
-        else inner+=`<span class="rb-meal empty" data-action="pickslot" data-day="${d.id}" data-slot="${s.key}"><span class="ev"><span class="ml">${MEAL_ANCHORS[s.key]}</span>＋</span></span>`;
-      } else {
-        entries.forEach(e=>{ const p=getPlace(e.placeId); if(p) inner+=rbActHTML(p,s.ctx); });
-      }
-    });
-    return `<div class="rb-day" data-action="${dayAction}" data-day="${d.id}">
-      <div class="rb-node" style="background:${zoneColor(seg.region)}">${esc(d.label.split('/')[1]||d.label)}<span class="nw">${d.wd}</span></div>
-      <div class="rb-zlab">${esc(regionLabel(seg.region)||'—')}</div>
-      <div class="rb-items">${inner}</div></div>`;
-  }).join('');
-}
 // ── 總覽矩陣（切片 A Task 7，藍本＝_prototype_overview.html 行 145–167，資料改吃 CNXCore.overviewModel 與細看同源）──
 function ovCellHTML(items,tentative){
   if(!items.length) return tentative
@@ -349,7 +326,7 @@ function ovCellHTML(items,tentative){
     return `<div class="ov-line">${warn}<span class="em">${placeEmoji(p)}</span><span class="nm">${esc(it.name)}</span></div>`;
   }).join('');
 }
-function renderOverview(){
+function renderOverviewMatrix(){
   const el=document.getElementById('ribbon'); if(!el) return;
   const model=CNXCore.overviewModel(DAYS, plan, places, slotMetaArr);   // slotMetaArr→待定旗標同源
   el.innerHTML=model.map(row=>{
@@ -363,9 +340,67 @@ function renderOverview(){
     </div>`;
   }).join('');
 }
-function renderRibbon(){ renderOverview(); }   // renderAll 呼叫點保留、內部走總覽矩陣。ribbonDaysHTML/rbActHTML/rbMealHTML/dayRowsHTML 仍在＝並看（⇅ 並看）重用
+function renderOverview(){
+  const flow=document.getElementById('pg-flow');
+  const m=ovMode();
+  if(flow){ flow.classList.toggle('mode-table', m==='table'); flow.classList.toggle('mode-matrix', m!=='table'); }
+  if(m==='table') renderOverviewTable(); else renderOverviewMatrix();
+}
+// ── v1 表格總覽（粗流雙版面）：直欄＝天、橫列＝細時段；資料讀 plan（與細排同源）、點擊走 v2、天欄/住宿讀 base 地區、⚠️走 cellWarning ──
+function renderOverviewTable(){   // v1 風格：前段/後段兩塊 table.mx；移植 v1 matrix 視覺、資料/色彩改吃 v2
+  const el=document.getElementById('ribbon'); if(!el) return;
+  const blocks=[DAYS.slice(0,6), DAYS.slice(6)].filter(d=>d.length);   // 不橫向擠成一條（像 v1 分前段/後段）
+  el.innerHTML=blocks.map((days,i)=>
+    `<div class="ovt-blocklab">${i===0?'前段':'後段'} ${esc(days[0].label)}–${esc(days[days.length-1].label)}</div><div class="ovt-wrap">${ovtTable(days)}</div>`
+  ).join('');
+}
+function ovtTable(days){
+  const regOf=d=>(CNXCore.baseForDay(base,d.id)||{}).region||'';
+  const tintOf=d=>zoneColor(regOf(d))+'1c';   // 區色淡染（同色低透明，像 v1 zold/znim/zmkt 的暖/冷/綠底）
+  const cols='<colgroup><col class="slcol">'+days.map(()=>'<col class="daycol">').join('')+'</colgroup>';
+  const head='<tr><th class="corner"></th>'+days.map(d=>{ const r=regOf(d);
+    return `<th>${esc(d.label)}<br><span class="zc" style="background:${zoneColor(r)}">${esc(d.wd)}·${esc(regionLabel(r)||'—')}</span></th>`;
+  }).join('')+'</tr>';
+  let body='';
+  SLOTS.forEach(s=>{
+    const lab=`<td class="sl ${s.kind}">${s.kind==='meal'?esc(s.icon||'')+' ':s.kind==='stay'?'🏨 ':''}${esc(s.label)}${s.ctx?'<br><span class="ctx">'+esc(s.ctx)+'</span>':''}</td>`;
+    body+=`<tr class="${s.kind}">`+lab+days.map(d=>{
+      const tint=tintOf(d);
+      if(s.kind==='stay'){
+        const seg=CNXCore.baseForDay(base,d.id)||{}, hp=seg.hotelPlaceId?getPlace(seg.hotelPlaceId):null;
+        const nm=hp?esc(hp.name):'（'+esc(regionLabel(seg.region)||'未設')+'・待訂）';
+        return `<td class="c" style="background:${tint}" data-action="openday" data-day="${d.id}"><div class="ovt-mi" style="border-left-color:${zoneColor(seg.region)}">🏨 <span class="nm">${nm}</span></div></td>`;
+      }
+      const meta=slotMetaOf(d.id,s.key); let pre='';
+      if(meta&&meta.pk) pre+=`<span class="ovt-pk">2選1</span>`;
+      if(meta&&meta.tentative) pre+=`<span class="ovt-tent" data-action="cleartent" data-day="${d.id}" data-slot="${s.key}">⏳ 待定</span>`;
+      const entries=plan.filter(e=>e.day===d.id&&e.slot===s.key);
+      let inner;
+      if(entries.length){
+        const day=DAYS.find(x=>x.id===d.id), per=CNXCore.slotPeriod(s.key);
+        inner=entries.map(e=>{ const p=getPlace(e.placeId); if(!p) return '';
+          const warn=per?CNXCore.cellWarning(p,day,per):'';
+          return `<div class="ovt-mi" style="border-left-color:${tcolor(p.type)}" data-action="occpanel" data-eid="${e.id}">${warn?`<span class="warn" title="${esc(warn)}">⚠️</span>`:''}${placeEmoji(p)} <span class="nm">${esc(p.name)}</span></div>`;
+        }).join('');
+      } else inner='<span class="cempty">＋</span>';
+      return `<td class="c" style="background:${tint}" data-action="pickslot" data-day="${d.id}" data-slot="${s.key}">${pre}${inner}</td>`;
+    }).join('')+'</tr>';
+  });
+  return `<table class="mx">${cols}${head}${body}</table>`;
+}
+function renderFlowbar(){
+  const el=document.getElementById('flowbar'); if(!el) return;
+  const m=ovMode(), split=document.body.classList.contains('split');
+  el.innerHTML=`<span class="ovseg">
+    <span class="${m==='table'?'on':''}" data-action="ovmode" data-m="table">表格</span>
+    <span class="${m==='matrix'?'on':''}" data-action="ovmode" data-m="matrix">矩陣</span>
+  </span>
+  <button class="flowsplit" data-action="flow-split">${split?'⇅ 收回':'⇅ 並看'}</button>`;
+}
+function applyOvMode(){ renderFlowbar(); renderOverview(); applyDesk(); }
+function renderRibbon(){ renderOverview(); }   // renderAll 呼叫點保留、內部走總覽（表格/矩陣）
 // ── 細排（Task 12）：點某天→bottom sheet；每 occurrence 獨立一列、原生 time picker、⏳待定列、住宿列 ──
-function dayRowsHTML(dayId){   // 共用：某天細排各 slot 列（細排 sheet 與並看上半 mini 共用）
+function dayRowsHTML(dayId){   // 共用：某天細排各 slot 列（細看 sheet／桌機右欄細看共用）
   const seg=CNXCore.baseForDay(base,dayId)||{};
   let rows='';
   SLOTS.forEach(s=>{
@@ -405,8 +440,8 @@ function detailPaneHTML(dayId){ return '<button class="dt-paneclose" data-action
 function openDetail(dayId){
   if(!DAYS.find(x=>x.id===dayId)) return;
   detailDay=dayId;
-  if(isDesktop()){ document.getElementById('pg-detail').innerHTML=detailPaneHTML(dayId); document.body.classList.add('has-detail'); }   // 桌機：右欄(暫代庫位)，地圖＋總覽不動
-  else openSheet(detailDayHTML(dayId));   // 手機：bottom sheet（scrim/ESC/關閉鈕現成）
+  if(isDesktop() && ovMode()!=='table'){ document.getElementById('pg-detail').innerHTML=detailPaneHTML(dayId); document.body.classList.add('has-detail'); }   // 矩陣桌機＝右欄細看
+  else openSheet(detailDayHTML(dayId));   // 表格模式（或手機）：用 sheet overlay，不佔 col3、不與庫軌衝突
 }
 function closeDetail(){ document.body.classList.remove('has-detail'); detailDay=null; }
 // ── 挑選器（openPicker，Task 13）：細排「＋加入」／粗流空錨點直開；mode='assign'|'backup'（backup 供 Task 15）──
@@ -430,10 +465,11 @@ function pickerRow(p,distTxt,closed,schedTxt){
 function openPicker(day,slot,mode){
   pkFilters={areas:new Set(),types:new Set(),bands:new Set(),cuisines:new Set(),slots:new Set()};
   renderPicker(day,slot,mode||'assign');
-  // 桌機（spec §4.12）：挑選器開啟＝地圖亮候選（壓暗其他）。只在有定位候選時觸發，避免空集 toast／無謂開抽屜
-  if(isDesktop()){
-    const cand=places.filter(p=>p.lat&&p.lng&&CNXCore.passLibFilters(p,{types:new Set(),areas:new Set(),tiers:new Set(),bands:new Set(),cuisines:new Set(),slots:new Set(),sched:'all'},{plan,bands:TRIP.priceBands})).map(p=>p.id);
-    if(cand.length){ mapSpotlightSet(cand); spotFromPicker=true; }   // mapSpotlightSet 重置 false，之後立即覆寫：標記為挑選器來源，關閉時需清除
+  // 桌機：挑選器開啟＝地圖亮「當日基地附近」的候選（壓暗遠的）；只在地圖已展開才亮、收起不硬撐開（桌機#3）。亮全部=沒對比=看不出來，故只亮附近。
+  if(isDesktop() && drawerOpen()){
+    const seg=CNXCore.baseForDay(base,day)||{};
+    const cand=places.filter(p=>p.lat&&p.lng&&nearSeg(p,seg)).map(p=>p.id);
+    if(cand.length){ mapSpotlightSet(cand); spotFromPicker=true; }
   }
 }
 function renderPicker(day,slot,mode){
@@ -798,6 +834,8 @@ document.addEventListener('click',e=>{
   const t=e.target.closest('[data-action]'); if(!t) return;
   const a=t.dataset.action;
   if(a==='tab'){ switchTab(t.dataset.pg); return; }
+  if(a==='ovmode'){ if(ovMode()!==t.dataset.m){ closeDetail(); setOvMode(t.dataset.m); applyOvMode(); } return; }   // 切模式先關桌機右欄細看：table 不用右欄、否則殘留並擠進 46px 軌欄＋庫軌被藏
+  if(a==='flow-split'){ if(document.body.classList.contains('split')) exitSplit(); else enterSplit(); return; }
   if(a==='verbtn'){ openVersions(); return; }
   if(a==='switchver'){ setActiveLocal(t.dataset.id); save(); renderAll(); closeSheet(); return; }   // active 本地（localStorage），不寫 DB、不進雲端文件（F15）
   if(a==='dupver'){ const name=prompt('新版本名稱', av().name+' 複本'); if(name===null) return;
@@ -810,6 +848,8 @@ document.addEventListener('click',e=>{
       setActiveLocal(DB.versions[0].id); save(); renderAll(); openVersions(); } return; }   // 切到倖存版（localStorage 同步更新，不靠 fallback）
   if(a==='mapbar'){ if(drawerOpen()){ mapPinned=false; closeDrawer(); } else { openDrawer(); } return; }
   if(a==='mappin'){ mapPinned=!mapPinned; if(mapPinned) openDrawer(); else updateDrawerUI(); return; }
+  if(a==='lib-rail'){ document.body.classList.remove('libcollapsed'); return; }     // 點右軌→展開庫
+  if(a==='lib-collapse'){ document.body.classList.add('libcollapsed'); return; }    // 點收合鈕→庫收成軌
   if(a==='assign'){ openAssign(t.dataset.id); return; }
   // ── 檢視卡 detailSheet（Task 16）動作列 ──
   if(a==='detail-assign'){ openAssign(t.dataset.id); return; }
@@ -1012,9 +1052,6 @@ document.addEventListener('click',e=>{
     if(d.placeId&&!p.placeId) p.placeId=d.placeId; if(d.cid&&!p.cid) p.cid=d.cid;
     if(d.mapsUrl&&!p.mapsUrl) p.mapsUrl=d.mapsUrl; if(d.hours&&!p.hours){ p.hours=d.hours; CNXCore.applyHoursDerived(p); }
     afterChange(); closeSheet(); toast('已補定位到「'+p.name+'」'); return; }
-  if(a==='lib-split'){ if(pgLib.classList.contains('split')) exitSplit(); else enterSplit(); return; }
-  if(a==='rm-day'){ miniDay=t.dataset.day; renderMiniTop(); return; }      // 並看上半：點某天→切該天細排 mini
-  if(a==='rm-back'){ miniDay=null; renderMiniTop(); return; }              // ‹ 回粗流
   if(a==='lib-detail'){ detailSheet(t.dataset.id); return; }
   if(a==='lib-cap'){ toggleCapPanel(t.dataset.cap); return; }   // 就地展開（取代彈窗）
   if(a==='cap-close'){ capPanelKey=null; renderCaps(); renderCapPanel(); return; }
@@ -1040,12 +1077,11 @@ document.addEventListener('click',e=>{
   if(a==='close'){ closeSheet(); return; }
 });
 // 挑選器搜尋（Task 13）：聚焦→拉高防鍵盤蓋列表；輸入→DOM 過濾店名／memo
-const pgLib=document.getElementById('pg-lib');
 document.addEventListener('focusin',e=>{
   if(e.target&&e.target.id==='pkSearch') sh.classList.add('tall');
-  if(e.target&&e.target.id==='libSearch'&&pgLib.classList.contains('split')) pgLib.classList.add('searching');   // 並看：聚焦搜尋→上半暫收防鍵盤擠壓
+  if(e.target&&e.target.id==='libSearch'&&document.body.classList.contains('split')) document.body.classList.add('searching');   // 並看：聚焦搜尋→上半暫收防鍵盤擠壓
 });
-document.addEventListener('focusout',e=>{ if(e.target&&e.target.id==='libSearch') pgLib.classList.remove('searching'); });
+document.addEventListener('focusout',e=>{ if(e.target&&e.target.id==='libSearch') document.body.classList.remove('searching'); });
 document.addEventListener('input',e=>{
   if(e.target&&e.target.id==='libSearch'){ libF.q=e.target.value; renderLib(); renderMarkers(); return; }   // 庫頁搜尋：name/memo（input 在 .lib-search 外於 #listgrid，重渲不失焦）
   if(!e.target||e.target.id!=='pkSearch') return;
@@ -1140,46 +1176,35 @@ function openManualLine(id){
   <div class="row" style="margin-top:6px"><span class="pill pri" data-action="ml-save" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span>${isNew?'':`<span class="pill danger" data-action="ml-del" data-id="${id}">刪除</span>`}<span class="pill" data-action="close">取消</span></div>`;
   openSheet(h); sh.dataset.mlper=m.per==='shared'?'shared':'person';
 }
-function afterChange(){ save(); renderAll(); if(pgLib&&pgLib.classList.contains('split')) renderMiniTop();
+function afterChange(){ save(); renderAll();
   if(document.body.classList.contains('has-detail')&&detailDay){ const pd=document.getElementById('pg-detail'); if(pd) pd.innerHTML=detailPaneHTML(detailDay); }   // 桌機右欄細看：資料變動後同步重繪
   if(!isDesktop()&&detailDay&&sheetOpen()&&sh.querySelector('.dt-head')){ sh.innerHTML='<button class="sheetclose" data-action="close">關閉</button>'+detailDayHTML(detailDay); }   // 手機細看 sheet 開著→就地重繪（修 cleartent/標待定後 UI 沒反應，Vivian #3）
 }
 
-// ── 並看模式（Task 17 §4.13）：庫頁「⇅ 粗流」→ 上半粗流摘要/細排 mini＋下半庫列表；與地圖抽屜互斥 ──
+// ── 並看（粗流頁觸發）：body 級「上 pg-flow（當前 ovMode）＋下 pg-lib 庫」；手機限定、與地圖抽屜互斥 ──
 let splitState=null;     // 進入時快照 {drawerWasOpen, wasPinned} 供退出還原
-let miniDay=null;        // null=粗流摘要；有值=該天細排 mini
-function renderMiniTop(){
-  const el=document.getElementById('ribbonMini'); if(!el) return;
-  if(miniDay){ const d=DAYS.find(x=>x.id===miniDay), seg=CNXCore.baseForDay(base,miniDay)||{};
-    el.innerHTML=`<span class="rm-back" data-action="rm-back">‹ 回粗流</span>
-      <div class="rm-hint">${d?esc(d.label)+'（'+d.wd+'）· '+esc(regionLabel(seg.region)||''):''}　＋加入照常開挑選器</div>
-      <div class="day-exp">${dayRowsHTML(miniDay)}</div>`;
-  } else {
-    el.innerHTML=`<div class="rm-hint">點某天＝上半切該天細排；下半翻庫、「📅 排入」走快速排入</div><div id="ribbon-mini-rib">${ribbonDaysHTML('rm-day')}</div>`;
-  }
-}
 function enterSplit(){
-  if(deskMq.matches) return;                                  // 桌機三欄常駐、不需並看
-  splitState={drawerWasOpen:drawerOpen(), wasPinned:mapPinned};   // 快照（含釘住）
-  mapPinned=false; closeDrawer();                             // 與地圖抽屜互斥：強制收合（含釘住）
-  miniDay=null; pgLib.classList.add('split');
-  document.getElementById('ribbonMini').style.height='';      // 用 CSS 預設高（對半）；拖曳才覆寫
-  renderMiniTop();
-  document.getElementById('splitBtn').textContent='⇅ 收回';
+  if(deskMq.matches) return;                                  // 桌機三欄常駐、用展開庫軌即可
+  splitState={drawerWasOpen:drawerOpen(), wasPinned:mapPinned};
+  mapPinned=false; closeDrawer();                             // 與地圖抽屜互斥
+  if(curTab!=='flow') switchTab('flow');
+  document.body.classList.add('split');
+  document.getElementById('pg-flow').style.height='';         // CSS 預設高（拖曳才覆寫）
+  renderLib(); renderFlowbar();
 }
 function exitSplit(){
-  if(!pgLib.classList.contains('split')) return;
-  pgLib.classList.remove('split','searching'); miniDay=null;
-  document.getElementById('ribbonMini').innerHTML='';
-  document.getElementById('splitBtn').textContent='⇅ 粗流';
-  if(splitState){ if(splitState.drawerWasOpen){ openDrawer(); mapPinned=splitState.wasPinned; updateDrawerUI(); } splitState=null; }   // 還原抽屜（含釘住）
+  if(!document.body.classList.contains('split')) return;
+  document.body.classList.remove('split','searching');
+  document.getElementById('pg-flow').style.height='';
+  if(splitState){ if(splitState.drawerWasOpen){ openDrawer(); mapPinned=splitState.wasPinned; updateDrawerUI(); } splitState=null; }
+  renderFlowbar();
 }
-// splitbar 拖曳：改上半 #ribbonMini 高度（30–70vh），上下容器各自獨立捲動
+// splitbar 拖曳：改上半 #pg-flow 高度（30–70vh），上下各自獨立捲動
 (function(){ const bar=document.getElementById('splitbar'); if(!bar) return; let dragging=false;
-  const top=()=>document.getElementById('ribbonMini');
-  bar.addEventListener('pointerdown',ev=>{ if(!pgLib.classList.contains('split')) return; dragging=true; bar.setPointerCapture(ev.pointerId); ev.preventDefault(); });
+  const top=()=>document.getElementById('pg-flow');
+  bar.addEventListener('pointerdown',ev=>{ if(!document.body.classList.contains('split')) return; dragging=true; bar.setPointerCapture(ev.pointerId); ev.preventDefault(); });
   bar.addEventListener('pointermove',ev=>{ if(!dragging) return;
-    const t0=top().getBoundingClientRect().top;               // ribbonMini 上緣（header＋收合地圖軌條之後）
+    const t0=top().getBoundingClientRect().top;
     const min=window.innerHeight*0.30, max=window.innerHeight*0.70;
     let h=ev.clientY-t0; h=Math.max(min,Math.min(max,h)); top().style.height=h+'px'; });
   const end=ev=>{ if(dragging){ dragging=false; try{bar.releasePointerCapture(ev.pointerId);}catch(_){}}};
@@ -1188,7 +1213,7 @@ function exitSplit(){
 
 let curTab='flow';
 function switchTab(pg){
-  if(pg!=='lib') exitSplit();                                 // 切到其他分頁＝退出並看
+  if(document.body.classList.contains('split')) exitSplit();   // 並看在粗流頁；切任何分頁＝退出並看
   if(pg!=='flow') closeDetail();                              // 切走總覽＝關桌機右欄細看（免殘留蓋住庫/預算）
   curTab=pg;
   document.getElementById('pg-flow').hidden = pg!=='flow';
@@ -1235,7 +1260,7 @@ function cfgCatHTML(){
 function findCat(k){ return (TRIP.categories||[]).find(c=>c.key===k); }
 let cfgSaveT=null;
 function saveCfgDebounced(){ clearTimeout(cfgSaveT); cfgSaveT=setTimeout(()=>{ save(); renderAllExceptSheet(); }, 400); }
-function renderAllExceptSheet(){ updateVerBtn(); renderRibbon(); renderLib(); renderBudget(); renderMarkers(); }
+function renderAllExceptSheet(){ updateVerBtn(); renderFlowbar(); renderRibbon(); renderLib(); renderBudget(); renderMarkers(); }
 function cfgRegionHTML(){
   const rows=regionsList().map((r,i)=>{
     const lock=r.key==='其他';
@@ -1297,9 +1322,15 @@ document.addEventListener('input',e=>{
   saveCfgDebounced();
 });
 function updateVerBtn(){ const v=av(); document.getElementById('verbtn').innerHTML='🗂️ <span class="vname">'+esc((v&&v.name)||'A 版')+'</span> ▾'; }   /* 名字進 .vname（可截斷），🗂️/▾ 留外面永遠可見（FIX1） */
-function renderAll(){ updateVerBtn(); renderRibbon(); renderLib(); renderBudget(); renderMarkers(); }
+function renderAll(){ updateVerBtn(); renderFlowbar(); renderRibbon(); renderLib(); renderBudget(); renderMarkers(); }
 const deskMq=window.matchMedia('(min-width:1100px)');
-function applyDesk(){ if(deskMq.matches){ if(curTab==='lib') switchTab('flow'); openDrawer(); } }   // 桌機：地圖常駐左欄、庫在右欄（分頁只切中欄）
+function applyDesk(){
+  if(!deskMq.matches){ document.body.classList.remove('libcollapsed'); return; }   // 手機無側軌
+  if(document.body.classList.contains('split')) exitSplit();                       // 並看是手機形態：resize 到桌機即退出
+  if(curTab==='lib') switchTab('flow');
+  if(ovMode()==='table'){ openDrawer(); document.body.classList.add('libcollapsed'); }   // 表格(v1樣)：地圖留著、庫收成軌、表格佔右側
+  else { openDrawer(); document.body.classList.remove('libcollapsed'); }                    // 矩陣：v2 三欄
+}
 deskMq.addEventListener('change',applyDesk);
 renderAll(); applyDesk();
 async function initSync(){

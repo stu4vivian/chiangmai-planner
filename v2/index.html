@@ -9,7 +9,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="core.js?v=28"></script>
 <script src="sync.js?v=22"></script>
-<link rel="stylesheet" href="styles.css?v=35">
+<link rel="stylesheet" href="styles.css?v=48">
 </head>
 <body>
 <header>
@@ -28,12 +28,11 @@
 </div>
 
 <main>
-  <section id="pg-flow"><div class="ov-head"><span>整趟</span><span>早</span><span>午</span><span>晚</span></div><div id="ribbon"></div></section>
+  <section id="pg-flow"><div id="flowbar"></div><div class="ov-head"><span>整趟</span><span>早</span><span>午</span><span>晚</span></div><div id="ribbon"></div></section>
+  <div id="splitbar"><span></span></div>
   <section id="pg-lib" hidden>
-    <div id="ribbonMini"></div>
-    <div id="splitbar"><span></span></div>
     <div id="libBody">
-      <div class="lib-search"><input id="libSearch" placeholder="🔍 搜店名／memo"><span class="add" data-action="lib-link">🔗 貼連結</span><span class="add" data-action="lib-new">＋新增</span><span class="add" id="splitBtn" data-action="lib-split">⇅ 粗流</span></div>
+      <div class="lib-search"><input id="libSearch" placeholder="🔍 搜店名／memo"><span class="add" data-action="lib-link">🔗 貼連結</span><span class="add" data-action="lib-new">＋新增</span><span class="add libcol" data-action="lib-collapse" title="收合庫">›</span></div>
       <div class="caps" id="libCaps"></div>
       <div class="capnel" id="libCapPanel" hidden></div>
       <div id="triageStrip"></div>
@@ -43,11 +42,12 @@
   </section>
   <section id="pg-budget" hidden></section>
   <section id="pg-detail" class="pane-detail"></section>
+  <div id="librail" data-action="lib-rail"><span class="lr-in"><span class="lr-ico">⭐</span><span class="lr-lab">庫</span></span></div>
 </main>
 
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="app.js?v=39"></script>
+<script src="app.js?v=48"></script>
 </body>
 </html>

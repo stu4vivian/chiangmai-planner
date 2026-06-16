@@ -21,7 +21,7 @@
   #pinbtn.on{background:#e8a13a;color:#fff;border-color:#e8a13a;}
   #mapdrawer .mapbody{display:none;}
   @media(max-width:1099px){
-    #mapdrawer.expanded .mapbody{display:block;height:calc(50vh - 38px);}
+    #mapdrawer.expanded .mapbody{display:block;height:calc(50dvh - 38px);}
   }
   #map{height:100%;}
   main>section{padding:12px;max-width:1480px;margin:0 auto;}
@@ -48,29 +48,37 @@
   .ov-empty.ov-tent{color:#9a6e25;font-size:11px;font-weight:700;white-space:nowrap;}   /* 空格＋待定：提醒「這格之後要填」（Vivian #3，總覽看得到待定） */
   .ov-tent-line{color:#9a6e25;font-size:11px;font-weight:700;}
   .pane-detail{display:none;}   /* 細看右欄：僅桌機 has-detail 時顯示（手機走 bottom sheet） */
+  /* ── 粗流雙版面：flowbar 切換列＋v1 表格 ── */
+  #flowbar{display:flex;align-items:center;gap:10px;padding:8px 12px 6px;}
+  .ovseg{display:inline-flex;border:1px solid #d8cdb8;border-radius:9px;overflow:hidden;}
+  .ovseg>span{padding:6px 13px;font-size:13px;color:#6b6356;cursor:pointer;background:#fff;}
+  .ovseg>span.on{background:var(--ink);color:#fff;font-weight:700;}
+  .flowsplit{margin-left:auto;border:1px solid #d8cdb8;background:#fff;color:#6b6356;border-radius:9px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit;}
+  #pg-flow.mode-table .ov-head{display:none;}
+  #pg-flow.mode-table #ribbon{overflow:visible;}
+  #pg-flow{--ovtSL:48px;--ovtDay:128px;}
+  /* v1 表格（移植 v1 matrix；色彩改吃 v2 動態 zoneColor/catColor）：前段/後段兩塊、暖色圓角格、區色淡染、項目左色條卡 */
+  .ovt-blocklab{font-size:12px;color:var(--muted);font-weight:700;margin:12px 2px 5px;}
+  .ovt-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;}
+  table.mx{border-collapse:separate;border-spacing:5px;width:max-content;}   /* 寬度=各欄總和→欄維持 daycol 寬、超出則 .ovt-wrap 橫向捲（修：原 table-layout:fixed＋nowrap 把欄撐到 180px）*/
+  table.mx col.slcol{width:var(--ovtSL);} table.mx col.daycol{width:var(--ovtDay);}
+  table.mx th{font-size:12px;font-weight:700;color:var(--ink);text-align:center;padding:0 0 3px;vertical-align:bottom;line-height:1.2;}
+  table.mx th.corner{position:sticky;left:0;background:var(--bg);z-index:3;}
+  table.mx th .zc{font-size:10px;color:#fff;border-radius:7px;padding:1px 7px;display:inline-block;margin-top:3px;font-weight:700;white-space:nowrap;}
+  table.mx td.sl{position:sticky;left:0;background:var(--bg);font-size:11px;color:#6b6356;font-weight:700;text-align:right;padding-right:6px;z-index:2;line-height:1.2;white-space:nowrap;}
+  table.mx td.sl.meal{color:#b07a2a;} table.mx td.sl.stay{color:#5a7fb0;}
+  table.mx td.sl .ctx{font-size:10px;color:#c2b9a6;font-weight:400;}
+  table.mx td.c{vertical-align:top;padding:4px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line);cursor:pointer;touch-action:manipulation;}
+  .ovt-mi{background:#fff;border-left:3px solid #999;border-radius:5px;padding:4px 7px;margin-bottom:3px;font-size:12px;line-height:1.35;box-shadow:0 1px 1px rgba(0,0,0,.07);display:flex;align-items:center;gap:4px;}
+  .ovt-mi:last-child{margin-bottom:0;}
+  .ovt-mi .nm{min-width:0;overflow-wrap:break-word;}   /* 折行（像 v1）：長店名不撐寬欄、欄維持窄、一眼多看幾天 */
+  .ovt-mi .warn{flex:none;font-size:11px;}
+  .ovt-mi .cx{color:#b07a1a;font-weight:700;font-size:11px;flex:none;}
+  .cempty{display:flex;align-items:center;justify-content:center;color:#cdc3ad;font-size:14px;min-height:22px;}
+  .ovt-tent{display:block;font-size:10px;font-weight:700;color:#9a6e25;margin-bottom:3px;cursor:pointer;}
+  .ovt-pk{display:inline-block;font-size:10px;font-weight:800;color:#fff;background:#e8742c;border-radius:5px;padding:1px 5px;margin-bottom:3px;}
 
-  /* 粗流時間軸（Task 11）：一天一行、脊線圓點色＝base 區（TRIP.zones 色票） */
-  /* #ribbon＝總覽矩陣容器；舊時間軸的左 padding(30px)＋脊線已移除——矩陣日號在格內(42px 欄)、不需左掛空間（切片A #1 修正：左側空白壓縮欄寬） */
-  .rb-day{position:relative;margin-bottom:13px;cursor:pointer;}
-  .rb-node{position:absolute;left:-30px;top:0;width:30px;height:30px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.18);}
-  .rb-node .nw{font-size:11px;font-weight:600;opacity:.85;}
-  .rb-zlab{font-size:11px;color:#a59c8b;margin-bottom:5px;}
-  .rb-items{display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:26px;}
-  .rb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;}   /* 長店名截斷：行不到螢幕邊（Black Canyon 等） */
-  .rb-meal{display:flex;align-items:center;gap:5px;background:#fff7ea;border:1px solid #f0dcb8;border-radius:9px;padding:3px 9px 3px 6px;font-size:12px;color:#4d463c;}
-  .rb-meal .ml{font-size:11px;font-weight:800;color:#fff;background:#d99a3a;border-radius:5px;padding:1px 4px;}
-  /* 行程球時段標（上午/午後/傍晚/晚）：粗流上可一眼讀早晚 */
-  .rb-ctx{font-size:11px;font-weight:800;color:#fff;background:#9bbf6f;border-radius:5px;padding:1px 4px;flex:none;}
-  /* A 案空錨點（CHANGE 3）：視覺極輕——細虛線淡 pill、矮（不超過真項目高度），但用「透明上下 padding」把點擊熱區撐到 ≥44px。
-     技巧：visible pill 畫在 content-box（background-clip:content-box＋邊框畫在 inner span），外層只負責熱區，故視覺權重與點擊區解耦、且熱區不靠絕對定位（不會誤吃鄰項點擊）。 */
-  .rb-meal.empty{background:transparent;border:0;padding:12px 9px;margin:0;display:inline-flex;align-items:center;line-height:1;-webkit-tap-highlight-color:transparent;cursor:pointer;}
-  .rb-meal.empty .ev{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:#bcab86;border:1px dashed #e0cfa6;border-radius:8px;padding:4px 9px;background:transparent;}
-  .rb-meal.empty .ml{background:transparent;color:#c3b48f;font-weight:700;font-size:11px;padding:0;}
-  .rb-act{display:flex;align-items:center;gap:5px;background:#fff;border-radius:20px;padding:3px 10px;font-size:12px;color:#4d463c;box-shadow:inset 0 0 0 1px #ece3d2;}
-  .rb-act .dot{width:7px;height:7px;border-radius:50%;flex:none;}
-  .rb-flag{font-size:11px;font-weight:800;border-radius:6px;padding:2px 7px;white-space:nowrap;}
-  .rb-flag.tent{background:#f3d48a;color:#7a5500;border:1px dashed #c9991f;}
-  .rb-flag.pk{background:#e8742c;color:#fff;}
+  /* （舊「粗流時間軸」.rb-* 樣式已隨 T4 退役 ribbonDaysHTML 一併移除——無元素再用） */
 
   /* 桌機三欄：地圖 0.9fr｜中欄（粗流/💰）1.1fr｜庫 1fr；地圖可收成 46px 軌條 */
   @media(min-width:768px) and (max-width:1099px){   /* 平板：總覽置中＋欄距加大（spec §5 新增斷點，免套手機版擠） */
@@ -80,13 +88,22 @@
     .ov-line{font-size:14px;}
   }
   @media(min-width:1100px){
-    body{display:grid;grid-template-columns:1.15fr 1.6fr 0.95fr;grid-template-rows:46px calc(100vh - 46px);height:100vh;overflow:hidden;}   /* 切片A：總覽(中)最寬＝主角；地圖(左)加寬>庫/細看(右)；地圖可收成軌條讓總覽更寬 */
+    body{display:grid;grid-template-columns:1.15fr 1.6fr 0.95fr;grid-template-rows:46px calc(100dvh - 46px);height:100dvh;overflow:hidden;}   /* 切片A：總覽(中)最寬＝主角；地圖(左)加寬>庫/細看(右)；地圖可收成軌條讓總覽更寬 */
     body:has(#mapdrawer.collapsed){grid-template-columns:46px 1.7fr 1fr;}
+    .lib-search .add.libcol{display:inline-flex;background:#ece6da;border-color:#cbbfa8;color:#5a5145;font-weight:700;}   /* 收庫鈕＝軌色醒目、別淹沒在白按鈕裡（共同#1：庫展開收得起來）*/
+    body.libcollapsed{grid-template-columns:minmax(200px,1fr) max-content 46px;}   /* v1 模型：表格＝內容固定寬(剛好6天)、地圖吃剩餘(自動縮放、寬螢幕更大)（桌機#1）*/
+    body.libcollapsed:has(#mapdrawer.collapsed){grid-template-columns:46px 1fr 46px;}
+    body.libcollapsed #pg-lib{display:none;}
+    body.libcollapsed #librail{display:flex;grid-row:2;grid-column:3;border-left:1px solid var(--line);background:#ece6da;align-items:center;justify-content:center;cursor:pointer;}
+    #librail .lr-in{display:flex;flex-direction:column;align-items:center;gap:8px;color:#6b6356;}
+    #librail .lr-lab{writing-mode:vertical-rl;text-orientation:upright;font-size:13px;letter-spacing:3px;}
+    body.libcollapsed.has-detail #librail{display:none;}
     header{grid-column:1/-1;position:static;}
     #mapdrawer{grid-row:2;grid-column:1;position:static;display:flex;flex-direction:column;border-right:1px solid var(--line);border-bottom:0;}
     #mapdrawer .mapbody{display:block;flex:1;height:auto;}
     #mapdrawer.collapsed .mapbody{display:none;}
-    #mapdrawer.collapsed #mapbar{padding:0 8px;overflow:hidden;}
+    #mapdrawer.collapsed #mapbar{height:auto;flex-direction:column;gap:8px;padding:12px 0;align-items:center;justify-content:center;overflow:hidden;}   /* 收成軌＝直式（比照庫軌，修橫排文字擠在46px破版，桌機#2）*/
+    #mapdrawer.collapsed #mapbartxt{display:block;writing-mode:vertical-rl;text-orientation:upright;letter-spacing:2px;line-height:1.1;}   /* display:block＋height:auto 才會真的直排（inline span 不轉向→原本還是橫的破版）*/
     #mapdrawer.collapsed #pinbtn{display:none;}
     main{display:contents;}
     main>section{grid-row:2;min-width:0;overflow-y:auto;max-width:none;margin:0;}
@@ -106,7 +123,7 @@
     .dt-paneclose{position:absolute;top:12px;right:14px;font-size:13px;color:#6b6356;background:#f4f1ea;border:1px solid var(--line);border-radius:8px;padding:5px 11px;cursor:pointer;font-family:inherit;}
     #pg-lib[hidden]{display:block;}
     .tabbtn[data-pg="lib"]{display:none;}
-    #splitBtn{display:none;}              /* 桌機三欄常駐，不需並看鈕 */
+    .flowsplit{display:none;}              /* 桌機三欄常駐＝已並看，不需「⇅並看」鈕（enterSplit 桌機本就早退，留著會是死鈕） */
   }
 
   .leaflet-popup-content{font-size:13px;line-height:1.55;}
@@ -127,6 +144,8 @@
   .lib-search{display:flex;align-items:stretch;gap:6px;margin-bottom:8px;}
   .lib-search input{flex:1;min-width:0;border:1px solid #e2d9c8;border-radius:9px;padding:8px 11px;font-size:16px;background:#fff;box-sizing:border-box;}
   .lib-search .add{flex:none;display:inline-flex;align-items:center;border:1px solid #d8cdb8;background:#fff;color:#6b6356;border-radius:9px;padding:0 11px;font-size:13px;cursor:pointer;white-space:nowrap;font-family:inherit;box-sizing:border-box;}
+  #librail{display:none;}
+  @media(max-width:1099px){ .lib-search .add.libcol{display:none;} }   /* 收庫鈕只手機隱藏；桌機由 @1100 規則顯示（修：原無條件 display:none 在後面蓋掉桌機顯示→庫收不起來）*/
   .caps{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:8px;padding-bottom:2px;}
   .cap{flex:none;display:inline-flex;align-items:center;min-height:34px;font-size:12.5px;border:1px solid #e2d9c8;border-radius:9px;padding:6px 12px;color:#6b6356;background:#fff;white-space:nowrap;cursor:pointer;font-family:inherit;transition:background .12s,border-color .12s,color .12s;}
   .cap.set{background:var(--ink);color:#fff;border-color:var(--ink);}
@@ -169,34 +188,32 @@
   .triage .ti .skip{font-size:11px;color:#a08e6a;border:1px solid #e0d4ba;border-radius:6px;padding:3px 8px;cursor:pointer;background:#fff;min-height:30px;display:inline-flex;align-items:center;}
   .lib-empty{font-size:13px;color:#a59c8b;text-align:center;padding:28px 0;}
 
-  /* ── 並看模式（Task 17 §4.13）：上半粗流摘要/細排 mini＋分隔線＋下半庫列表 ── */
-  #ribbonMini{display:none;}
+  /* ── 並看（粗流頁觸發）：手機 body 級上下分割 ── */
   #splitbar{display:none;}
   @media(max-width:1099px){
-    #pg-lib.split{display:flex;flex-direction:column;height:calc(100vh - 84px);padding:0;overflow:hidden;}   /* 扣 header 46＋收合中地圖軌條 38 */
-    #pg-lib.split #ribbonMini{display:block;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 4px;flex:none;height:45vh;}   /* 預設對半（拖曳改 inline height 30–70vh）；libBody flex:1 補滿其餘 */
-    #pg-lib.split.searching #ribbonMini,#pg-lib.split.searching #splitbar{display:none;}
-    #pg-lib.split #splitbar{display:flex;align-items:center;justify-content:center;height:16px;flex:none;background:#e7e0d2;border-top:1px solid #d8d0c2;border-bottom:1px solid #d8d0c2;cursor:row-resize;touch-action:none;}
-    #pg-lib.split #splitbar span{width:42px;height:4px;border-radius:2px;background:#b9ad97;}
-    #pg-lib.split #libBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px;min-height:0;}
+    body.split main{display:flex;flex-direction:column;height:calc(100dvh - 84px);overflow:hidden;}
+    body.split #pg-flow{display:flex;flex-direction:column;height:45dvh;flex:none;width:100%;min-width:0;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0;}   /* 寬度鎖 viewport（不被表格 max-content 撐到 856）→ 上半橫向不外溢、⇅收回 不被推出畫面（手機#4）；表格橫滑由 .ovt-wrap 處理 */
+    body.split #flowbar{position:sticky;top:0;background:var(--bg);z-index:3;}   /* 並看：表格/矩陣＋⇅收回 釘在上半頂端，捲表格也不消失（手機#4：開了收得回）*/
+    body.split #splitbar{display:flex;align-items:center;justify-content:center;height:16px;flex:none;background:#e7e0d2;border-top:1px solid #d8d0c2;border-bottom:1px solid #d8d0c2;cursor:row-resize;touch-action:none;}
+    body.split #splitbar span{width:42px;height:4px;border-radius:2px;background:#b9ad97;}
+    body.split #pg-lib{display:flex;flex-direction:column;flex:1;min-height:0;width:100%;min-width:0;box-sizing:border-box;overflow:hidden;padding:0;}   /* 同上半 pg-flow：鎖 viewport 寬＋min-width:0，否則庫列 min-content 把下半撐到 >viewport、main overflow:hidden 裁掉右側＋新增/triage 跳過鈕（手機並看 bug） */
+    body.split #pg-lib #libBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px;min-height:0;}
+    body.split #pg-budget{display:none;}
+    body.split.searching #pg-flow,body.split.searching #splitbar{display:none;}
   }
-  /* 並看 mini 粗流：.rb-node 是 left:-30px（相對 .rb-day）→ 內層需 padding-left:30px 讓日號圓點不被切（外層 #ribbonMini 只有 12px）。詳排視圖(.day-exp)無 rb-node，不受影響。 */
-  #ribbon-mini-rib{padding-left:30px;position:relative;}
-  #ribbonMini .rm-back{font-size:12px;color:#6b6356;background:#fff;border:1px solid #e2d9c8;border-radius:8px;padding:4px 10px;display:inline-block;margin-bottom:8px;cursor:pointer;}
-  #ribbonMini .rm-hint{font-size:11px;color:#a59c8b;margin-bottom:6px;}
 
   .overlay{position:fixed;inset:0;background:rgba(40,36,30,.45);z-index:1300;display:none;align-items:flex-end;justify-content:center;}
   body.sheet-open{overflow:hidden;}   /* 彈窗開著時鎖背景捲動：手機才會動到（桌機 body 本就 grid+overflow:hidden）；修 Vivian #2「往下滑往上滑彈窗被 header 擋住、關不掉」 */
   .overlay.on{display:flex;}
-  .sheet{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:16px;max-height:67vh;overflow:auto;position:relative;}
+  .sheet{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:16px;max-height:67dvh;overflow:auto;position:relative;}
   .sheetclose{position:absolute;top:12px;right:12px;border:1px solid #e0d8c8;background:#fff;color:#8a8276;border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit;z-index:2;}
   @media(min-width:560px){ .overlay{align-items:center;} .sheet{border-radius:16px;} }
   /* 桌機（≥1100px，spec §4.12）：彈窗 sheet 改「右側固定面板」（非底部 sheet）。body 前綴提高特異度，勝過後續無條件的 .sheet.sheet-picker 高度規則 */
   @media(min-width:1100px){
     body .overlay{align-items:stretch;justify-content:flex-end;background:transparent;pointer-events:none;}   /* 背景不暗化、不擋三欄；panel 自身接事件 */
     body .overlay.on .sheet{pointer-events:auto;}
-    body .sheet{width:380px;max-width:380px;height:100vh;max-height:100vh;border-radius:0;border-left:1px solid var(--line);box-shadow:-6px 0 22px rgba(40,36,30,.16);}
-    body .sheet.sheet-picker,body .sheet.sheet-picker.tall,body .sheet.tall{height:100vh;max-height:100vh;}    /* 挑選器/設定頁右欄滿高（覆寫半屏/82dvh） */
+    body .sheet{width:380px;max-width:380px;height:100dvh;max-height:100dvh;border-radius:0;border-left:1px solid var(--line);box-shadow:-6px 0 22px rgba(40,36,30,.16);}
+    body .sheet.sheet-picker,body .sheet.sheet-picker.tall,body .sheet.tall{height:100dvh;max-height:100dvh;}    /* 挑選器/設定頁右欄滿高（覆寫半屏/82dvh） */
     body .sheet .pk-handle{display:none;}                                               /* 桌機右欄不需拖曳把手 */
   }
   .sheet h3{margin:0 0 4px;font-size:16px;}
@@ -247,7 +264,7 @@
   /* ── 挑選器（openPicker）：半屏可拖 sheet（Task 13），重設計：精簡頭部／動作分離／篩選可收分組／列左對齊 ── */
   .sheet.sheet-picker{max-height:82dvh;}            /* 內容撐高、最多 82dvh（dvh 避 iOS 動態工具列把彈窗頂推到 header 後）；不再固定 85vh 滿版（Vivian #2 矯枉過正） */
   .sheet.sheet-picker.tall{max-height:82dvh;}
-  .sheet.tall{max-height:82dvh;}                    /* 設定頁（非 picker）也撐高，否則只有預設 67vh、列多要捲（code review #1） */
+  .sheet.tall{max-height:82dvh;}                    /* 設定頁（非 picker）也撐高，否則只有預設 67dvh、列多要捲（code review #1） */
   /* .pk2＝重設計版（openPicker）；openAssign 仍用 .sheet-picker 的高度但維持原本 padding/捲動，不套下列 flex 版面 */
   .sheet.sheet-picker.pk2{display:flex;flex-direction:column;padding:14px 16px 0;overflow:hidden;}
   .pk-handle{width:40px;height:4px;border-radius:2px;background:#d8cdb8;margin:0 auto 8px;cursor:grab;flex:none;}
@@ -314,8 +331,6 @@
   /* toast 復原鈕（只在 toast 顯示時可點，消失後不留幽靈點擊區） */
   .toast .undo{margin-left:12px;color:#8fd0b6;font-weight:800;text-decoration:underline;cursor:pointer;pointer-events:none;}
   .toast.on .undo{pointer-events:auto;}
-  /* 並看（⇅ 並看）粗流摘要列仍可點切換（rm-day）；主畫面原地手風琴已移除（切片 A→細看走 sheet） */
-  .rb-day .rb-items{cursor:pointer;}
   /* ── 細看標題列（切片 A Phase 3）：sheet 內「N 日（週幾）· 區域」；右上關閉鈕由 openSheet 提供，故 padding-right 留位 ── */
   .dt-head{display:flex;align-items:baseline;gap:7px;margin:2px 0 10px;padding-right:60px;}
   .dt-head h3{margin:0;font-size:16px;}
