@@ -21,7 +21,7 @@
   #pinbtn.on{background:#e8a13a;color:#fff;border-color:#e8a13a;}
   #mapdrawer .mapbody{display:none;}
   @media(max-width:1099px){
-    #mapdrawer.expanded .mapbody{display:block;height:calc(50dvh - 38px);}
+    #mapdrawer.expanded .mapbody{display:block;height:30svh;}   /* 正常展開＝30svh：與看卡 co-view 同高(關卡不跳)、svh 穩定不隨捲動網址列改變(修 bug 地圖往下滑高度跑掉)；Vivian 拍板 */
   }
   #map{height:100%;}
   main>section{padding:12px;max-width:1480px;margin:0 auto;}
@@ -244,6 +244,19 @@
   .sheet-edit .edfoot .pill.cancel{flex:1;}
   .sheet-edit .edfoot .pill.del{flex:none;color:#c0392b;border-color:#ecd3cf;padding:11px 13px;}
   .sheet-edit .chip{font-size:14px;padding:8px 13px;border-radius:9px;min-height:36px;display:inline-flex;align-items:center;}   /* 編輯卡膠囊：對齊 .fchip 尺寸（≥36px、圓角 9）一致觸控 */
+  /* ── 看/編輯卡 co-view（本切片）：手機限定（<1100），卡片彈窗不暗化、可穿透，地圖小窗在上、卡片在下 ── */
+  @media(max-width:1099px){
+    body.cardpeek .overlay{background:transparent;pointer-events:none;align-items:flex-end;}   /* 套桌機右欄同招：不暗化、不擋上方地圖；align-items 蓋掉 560+ 的置中 */
+    body.cardpeek .overlay.on .sheet{pointer-events:auto;}                                       /* 卡片本身接事件 */
+    body.cardpeek #mapdrawer.expanded .mapbody{height:30svh;}             /* 看卡：地圖小窗 30svh（與正常展開同高、穩定不隨捲動跳）；Vivian 回饋手機地圖別太高 */
+    body.cardpeek.peek-edit #mapdrawer.expanded .mapbody{height:24svh;}   /* 編輯：更薄、讓位給表單 */
+    body.cardpeek .sheet{max-height:52dvh;}                               /* 卡片落下半、不蓋滿、露出上方地圖 */
+    body.cardpeek.peek-edit .sheet{max-height:62dvh;}                     /* 編輯表單高一點、內部仍捲動（.edscroll）*/
+  }
+  /* ── 桌機表格版：開卡片/占用面板（右側 380px 浮層）會蓋住表格右段且點不到 → 開 sheet 時格線右側保留 380px 給浮層、表格欄(原 max-content 會撐大)改 minmax(0,…) 可縮 → .ovt-wrap 橫向捲、後段天數全可點（修 bug1；既有桌機版面問題、非本次新功能造成） ── */
+  @media(min-width:1100px){
+    body.libcollapsed.sheet-open{grid-template-columns:minmax(240px,1fr) minmax(0,1.3fr) 46px;padding-right:380px;}
+  }
   /* ── 檢視卡（detailSheet）：瘦身六區塊＋矮小動作列（Task 16） ── */
   .vcard h3{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:17px;margin:2px 0 0;}
   .vcard .vmemo{font-size:13px;color:#6b6356;margin:8px 0 2px;line-height:1.5;}

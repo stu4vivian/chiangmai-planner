@@ -936,7 +936,28 @@
     return { old: old, demoted: demoted };
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
+  // 占用面板聚焦用：回傳「這格相關的一組 placeId」＝占用者＋備案＋(2選1)同格對手；去重、保序、只取有定位者。純函式（無 DOM）。
+  function occSpotlightIds(version, eid, places) {
+    var plan = (version && version.plan) || [];
+    var e = plan.find(function (x) { return x.id === eid; });
+    if (!e) return [];
+    var meta = getSlotMeta(version, e.day, e.slot) || { backups: [] };
+    var ids = [e.placeId].concat(meta.backups || []);
+    if (meta.pk) {
+      plan.forEach(function (x) { if (x.day === e.day && x.slot === e.slot) ids.push(x.placeId); });
+    }
+    var seen = {}, out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      if (!id || seen[id]) continue;
+      seen[id] = 1;
+      var p = (places || []).find(function (pp) { return pp.id === id; });
+      if (p && p.lat != null && p.lng != null) out.push(id);
+    }
+    return out;
+  }
+
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, occSpotlightIds: occSpotlightIds, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;
