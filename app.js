@@ -432,7 +432,11 @@ function renderFlowbar(){
   <button class="flowsplit" data-action="flow-split">${split?'⇅ 收回':'⇅ 並看'}</button>`;
 }
 function applyOvMode(){ renderFlowbar(); renderOverview(); applyDesk(); }
-function renderRibbon(){ renderOverview(); }   // renderAll 呼叫點保留、內部走總覽（表格/矩陣）
+function renderRibbon(){   // renderAll 呼叫點保留、內部走總覽（表格/矩陣）
+  const sl=[...document.querySelectorAll('#ribbon .ovt-wrap')].map(w=>w.scrollLeft);   // 表格模式：存住橫向捲動位置（前段/後段各一）
+  renderOverview();
+  if(sl.some(x=>x)){ const w=document.querySelectorAll('#ribbon .ovt-wrap'); w.forEach((el,i)=>{ if(sl[i]!=null) el.scrollLeft=sl[i]; }); }   // 重建後還原（修：編輯/任何變更後表格跳回最左邊）
+}
 // ── 細排（Task 12）：點某天→bottom sheet；每 occurrence 獨立一列、原生 time picker、⏳待定列、住宿列 ──
 function dayRowsHTML(dayId){   // 共用：某天細排各 slot 列（細看 sheet／桌機右欄細看共用）
   const seg=CNXCore.baseForDay(base,dayId)||{};
