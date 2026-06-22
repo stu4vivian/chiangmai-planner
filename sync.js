@@ -33,14 +33,26 @@
     var applyDb = opts.applyDb;            // (db) => 設全域 + renderAll
     var onStatus = opts.onStatus || function () {};
     var mergeDb = opts.mergeDb;            // CNXCore.mergeDb
-    var synced = null, syncedVersion = -1, saveTimer = null, pollTimer = null;
+    var getSyncedVersion = opts.getSyncedVersion, setSyncedVersion = opts.setSyncedVersion;   // 持久化「上次同步到的雲端版本」（per-device localStorage）；boot 靠它判斷雲端有沒有領先本機
+    var iv = getSyncedVersion ? getSyncedVersion() : -1;
+    var synced = null, syncedVersion = (typeof iv === 'number' ? iv : -1), saveTimer = null, pollTimer = null;
     function clone(o) { return JSON.parse(JSON.stringify(o)); }   // synced 必須是「不可變快照」，不能持有 App 會就地改動的活陣列參照
+    function setVer(v) { syncedVersion = v; if (setSyncedVersion) setSyncedVersion(v); }   // 更新 syncedVersion 一律走這裡＝順手持久化，reload 後才判斷得出雲端有沒有領先
 
     function load() {
       onStatus('syncing');
       return client.getTrip(tripId).then(function (row) {
         if (!row) throw new Error('trip not found');
-        applyDb(row.data); synced = clone(getLocalDb()); syncedVersion = row.version;  // synced 抓「套用後」的快照，避免 raw vs migrate 誤判 dirty
+        var localDb = getLocalDb();
+        if (syncedVersion >= 0 && localDb && row.version === syncedVersion) {
+          // 雲端 version 沒領先＝雲端沒有別人/另一裝置的新東西。本機 localStorage 才是真相（可能有 push 還沒跑完就 reload 的變更，例如剛刪的卡）。
+          // 不可用雲端覆蓋（bug#1：否則 800ms push debounce 被 reload 打斷時，刪除/編輯會被雲端舊資料蓋回來＝復活）。保留本機，把未 push 的變更推上去。
+          synced = clone(localDb);
+          onStatus('synced');
+          scheduleSave();   // ponytail: 無腦 push；正常 reload（本機==雲端）會多送一次相同內容＝version+1，低頻 app 不值得為省這次去比對 dirty
+          return row;
+        }
+        applyDb(row.data); synced = clone(getLocalDb()); setVer(row.version);  // 首次或雲端領先：套用雲端。synced 抓「套用後」快照，避免 raw vs migrate 誤判 dirty
         onStatus('synced'); return row;
       }).catch(function (e) { onStatus('offline'); throw e; });
     }
@@ -48,14 +60,14 @@
     function doSave() {
       var local = clone(getLocalDb());                              // 凍結這一刻的本機狀態當「mine」
       return client.saveTrip(tripId, local, syncedVersion).then(function (v) {
-        if (v !== -1) { synced = local; syncedVersion = v; onStatus('synced'); return; }
+        if (v !== -1) { synced = local; setVer(v); onStatus('synced'); return; }
         return client.getTrip(tripId).then(function (row) {            // 衝突 → 拉遠端、合併、重試一次
           var merged = mergeDb(synced, local, row.data);
           applyDb(merged);
           var mergedLocal = clone(getLocalDb());                       // 套用後快照（同 load 的紀律），衝突後 poll 才不會誤判 dirty
           return client.saveTrip(tripId, mergedLocal, row.version).then(function (v2) {
-            if (v2 !== -1) { synced = mergedLocal; syncedVersion = v2; onStatus('synced'); }
-            else { synced = clone(row.data); syncedVersion = row.version; scheduleSave(); } // 仍衝突 → 稍後再合併
+            if (v2 !== -1) { synced = mergedLocal; setVer(v2); onStatus('synced'); }
+            else { synced = clone(row.data); setVer(row.version); scheduleSave(); } // 仍衝突 → 稍後再合併
           });
         });
       }).catch(function () { onStatus('offline'); });
@@ -73,7 +85,7 @@
           var dirty = JSON.stringify(getLocalDb()) !== JSON.stringify(synced);
           if (!dirty) {
             return client.getTrip(tripId).then(function (row) {
-              applyDb(row.data); synced = clone(getLocalDb()); syncedVersion = row.version; onStatus('synced');
+              applyDb(row.data); synced = clone(getLocalDb()); setVer(row.version); onStatus('synced');
             });
           } // 有本機未存變動就先不動，下次 scheduleSave 會合併
         }

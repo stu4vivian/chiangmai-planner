@@ -251,10 +251,13 @@ async function initSync(){
       localStorage.setItem(TRIPKEY, tripId);
       if(!location.hash) location.hash = 't='+tripId;
     } else { localStorage.setItem(TRIPKEY, tripId); }
+    const svKey=(V2_ENV?'cnx-sv-v2:':'cnx-sv:')+tripId;   // 上次同步到的雲端版本（per-device、per-trip）：boot 靠它判斷雲端有沒有領先本機，避免用雲端舊資料蓋掉還沒 push 完的本機變更（bug#1 刪卡復活）
     syncCtl = CNXSync.createSyncController({
-      client, tripId, getLocalDb, applyDb, mergeDb:CNXCore.mergeDb, onStatus:setSyncStatus
+      client, tripId, getLocalDb, applyDb, mergeDb:CNXCore.mergeDb, onStatus:setSyncStatus,
+      getSyncedVersion:function(){ const r=localStorage.getItem(svKey); return r==null?-1:(+r); },
+      setSyncedVersion:function(v){ localStorage.setItem(svKey, String(v)); }
     });
-    await syncCtl.load();                              // 拉雲端最新覆蓋本機畫面
+    await syncCtl.load();                              // boot 同步：雲端領先才覆蓋、否則保留本機（見 sync.js load）
     syncCtl.startPolling();
   }catch(e){ setSyncStatus('offline'); }
 }
