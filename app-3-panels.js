@@ -61,7 +61,6 @@ function renderPicker(day,slot,mode){
     ${grp('地區', regionsList().map(r=>`<span class="fchip ${pkFilters.areas.has(r.key)?'on':''}" data-action="pk-area" data-v="${esc(r.key)}">${esc(r.label)}</span>`).join(''))}
     ${grp('類別', categoriesList().map(c=>`<span class="fchip ${pkFilters.types.has(c.key)?'on':''}" data-action="pk-type" data-v="${esc(c.key)}">${esc(c.icon)} ${esc(c.label)}</span>`).join(''))}
     ${grp('價位', (TRIP.priceBands.tiers||[]).map(t=>`<span class="fchip ${pkFilters.bands.has(t.label)?'on':''}" data-action="pk-band" data-v="${esc(t.label)}">${esc(t.label)}</span>`).join(''))}
-    ${grp('菜系', (TRIP.cuisinesList||[]).map(c=>`<span class="fchip ${pkFilters.cuisines.has(c.key)?'on':''}" data-action="pk-cui" data-v="${esc(c.key)}">${esc(c.label)}</span>`).join(''))}
     ${grp('時段', [['morning','早'],['noon','中午'],['evening','晚上']].map(kl=>`<span class="fchip ${pkFilters.slots.has(kl[0])?'on':''}" data-action="pk-slot" data-v="${kl[0]}">${kl[1]}</span>`).join(''))}
   </div>`;
   let h=`<div class="pk-handle" data-action="pk-grow"></div>
@@ -86,62 +85,26 @@ function renderPicker(day,slot,mode){
 }
 
 const ov=document.getElementById('overlay'),sh=document.getElementById('sheet');
-function openSheet(html){ sh.classList.remove('sheet-edit','sheet-picker','pk2','tall'); document.body.classList.remove('cardpeek','peek-edit'); ['pkDay','pkSlot','pkMode','qaPid','qaMove','omPid','omMove','omDay','omSlot','opEid'].forEach(k=>delete sh.dataset[k]); sh.innerHTML='<button class="sheetclose" data-action="close">關閉</button>'+html; ov.classList.add('on'); document.body.classList.add('sheet-open'); }
+let navStack=[], curReopen=null, curKey=null;   // 返回堆疊＋自動巢狀：每個「父層」sheet 開窗時登記 curReopen(怎麼重開自己)+curKey；開不同子窗→openSheet 自動 push 父層→closeSheet pop 回去。統一取代散落旗標，且新浮層不會再漏（巢狀自動記住，非逐點手接）
+function openSheet(html, reopen, key){
+  if(document.body.classList.contains('sheet-open') && curReopen && key!==curKey) navStack.push(curReopen);   // 在父層上開「不同的」子窗→自動記住回父層（同 key＝原地重繪不記；父層自己登記 curReopen，任何子窗都涵蓋、不漏）
+  sh.classList.remove('sheet-edit','sheet-picker','pk2','tall','sheet-cfg'); document.body.classList.remove('cardpeek','peek-edit'); ['pkDay','pkSlot','pkMode','omPid','omMove','omDay','omSlot','opEid','dsPid','dsMove','wkKind','wkKey','emCat'].forEach(k=>delete sh.dataset[k]); sh.innerHTML='<button class="sheetclose" data-action="close" aria-label="關閉">✕</button>'+html; ov.classList.add('on'); document.body.classList.add('sheet-open');
+  curReopen=reopen||null; curKey=key||null;   // 登記「怎麼重開現在這個畫面」（過場/葉子不傳＝不可被返回）
+}
 // ↑ 每次開新 sheet 先清 co-view class：看卡/編輯/占用面板會在 openSheet 後再由 autoSpot 重加；其餘 sheet（排入/挑選器…）保持正常深背景、正常高度（修：從卡片開排入/掛備案時 cardpeek 殘留樣式）。抽屜還原/spotlight 清除仍由 closeSheet→exitCardPeek（看 prevDrawerState，非 class）負責。
 function closeSheet(){
-  // 手機：關的若是「細看的子彈窗」（挑選器/編輯/選飯店…，非細看本身）→ 關完回到那天的細看（Vivian #4：回上一個操作畫面，非跳回總覽）
-  const backToDetail = !isDesktop() && detailDay && sh && !sh.querySelector('.dt-head');
-  ov.classList.remove('on');
-  document.body.classList.remove('sheet-open');
-  exitCardPeek();                                                  // 手機 co-view：移除 cardpeek＋還原抽屜（內含 guard，非 co-view 時 no-op）
-  if(spotFromCard){ spotIds=null; spotFromCard=false; if(drawerOpen()) renderMarkers(); }   // 看/編輯卡的自動 spotlight：關卡即清、地圖回正常（桌機＋手機）
-  if(isDesktop()&&spotFromPicker&&spotIds){ spotIds=null; spotFromPicker=false; renderMarkers(); }   // 挑選器關閉→清除自身 spotlight
-  if(backToDetail){ openDetail(detailDay); }       // 回那天細看（待定/新加入的項目都看得到→也讓 #3「標待定」變可見）
-  else if(!isDesktop()) detailDay=null;             // 關的是細看本身→清掉
+  const back=navStack.pop();                                       // 返回堆疊：有上一層就回去，沒有才真的關
+  curReopen=null; curKey=null;                                     // 先清：避免 back() 重開父層時把「剛關掉的子窗」誤 push（return-flow 不 push）
+  exitCardPeek();                                                  // 每次關都做：co-view／spotlight 拆解（回上一層或真關都要）
+  if(spotFromCard){ spotIds=null; spotFromCard=false; if(drawerOpen()) renderMarkers(); }
+  if(isDesktop()&&spotFromPicker&&spotIds){ spotIds=null; spotFromPicker=false; renderMarkers(); }
+  if(back){ back(); return; }                                      // 回上一個畫面（back()→openX→openSheet 重設 curReopen/curKey）
+  ov.classList.remove('on'); document.body.classList.remove('sheet-open');   // 沒有上一層＝真正關閉
+  if(!isDesktop()) detailDay=null;
 }
 
-// ── 快速排入面板（openAssign，Task 14）：卡片/地圖「排入」與「移到別格」共用；moveEid 有值＝移格模式 ──
-function openAssign(placeId, moveEid){
-  const p=getPlace(placeId); if(!p) return;
-  const SLOT_KEYS=SLOTS.filter(s=>s.kind!=='stay').map(s=>s.key);
-  // 自錨點排除：移格模式下，把正被移動的那筆 occurrence 從 plan 排除再算推薦/距離（否則自己當錨點 dist 0）
-  const ver=av(); const recoVer = moveEid ? {...ver, plan: ver.plan.filter(e=>e.id!==moveEid)} : ver;
-  const recos=CNXCore.recommendSlots(p, recoVer, places, SLOT_KEYS, TRIP);
-  const f=x=>x==null?'—':(x>=1000?(x/1000).toFixed(1)+'km':x+'m');
-  let h=`<h3>${moveEid?'移到別格':'排入'}：${placeEmoji(p)} ${esc(p.name)}</h3>
-  <div class="sd">${esc(regionLabel(p.area))}${costLabel(p.cost)?('・'+costLabel(p.cost)):''}${CNXCore.condenseHours(p)?('・'+esc(CNXCore.condenseHours(p))):''}</div>`;
-  if(recos.length) h+=`<div class="qa-reco"><div class="rt">🎯 離它最近的空格</div>`+recos.map(r=>{
-    const d=DAYS.find(x=>x.id===r.day)||{label:r.day};
-    return `<span class="rc" data-action="qa-place" data-day="${r.day}" data-slot="${r.slot}"><b>${esc(d.label||r.day)} ${esc(slotObj(r.slot).label)}</b><span class="d">${f(r.dist)}</span></span>`;
-  }).join('')+`</div>`;
-  DAYS.forEach(d=>{
-    const seg=CNXCore.baseForDay(base,d.id)||{}, same=nearSeg(p, seg);
-    const wdIdx=CNXCore.WD_ZH.indexOf(d.wd);
-    const closed=Array.isArray(p.closedDays)&&p.closedDays.includes(wdIdx);
-    let rows='', emptyRun=[];
-    const flush=()=>{ if(!emptyRun.length) return;
-      const dist=CNXCore.emptySlotDist(p, recoVer, places, d.id, emptyRun[0], SLOT_KEYS);
-      rows+=`<div class="qa-grp"><div class="chips">`+emptyRun.map(k=>
-        `<span class="qa-chip" data-action="qa-place" data-day="${d.id}" data-slot="${k}">＋${esc(slotObj(k).label)}</span>`).join('')+
-        `</div>${dist!=null?`<div class="dist">←→ ${f(dist)}</div>`:''}</div>`; emptyRun=[]; };
-    SLOT_KEYS.forEach(k=>{
-      const ents=plan.filter(e=>e.day===d.id&&e.slot===k&&e.id!==moveEid);   // 移格模式不把自己當占用
-      if(ents.length){ flush(); ents.forEach(e=>{ const op=getPlace(e.placeId);
-        rows+=`<div class="qa-anchor" data-action="qa-occupied" data-day="${d.id}" data-slot="${k}">${placeEmoji(op)} <span class="nm">${esc(slotObj(k).label)}・${esc(op?op.name:'')}</span><span class="tap">換/並存 ›</span></div>`; }); }
-      else emptyRun.push(k);
-    }); flush();
-    const totalEmpty=!plan.some(e=>e.day===d.id&&e.slot!=='stay'&&e.id!==moveEid);
-    const hotel=seg.hotelPlaceId?getPlace(seg.hotelPlaceId):null;
-    const dHotel=hotel?CNXCore.distanceM(p,hotel):null;
-    const num=d.label.split('/')[1]||d.label;
-    h+=`<div class="qa-day ${same?'same':''} ${closed?'closed':''}">
-      <div class="dh"><span class="dot" style="background:${zoneColor(seg.region)}">${esc(num)}</span>${esc(d.wd)}
-      ${same?'<span class="same-tag">同區</span>':''}${closed?'<span style="color:#b54545;font-size:11px;font-weight:700">⚠️ 這天休</span>':''}
-      ${totalEmpty?`<span class="info">整天空${dHotel!=null?('・離住宿 '+f(dHotel)):''}</span>`:''}</div>${rows}</div>`;
-  });
-  openSheet(h); sh.classList.add('sheet-picker');
-  sh.dataset.qaPid=placeId; sh.dataset.qaMove=moveEid||'';
-}
+// （openAssign「面板選格」已退役 → 改「總覽亮格點放」：armPlace/armMove/dropInto 在 app-2，spec §11；
+//  原本面板的「🎯 離它最近的空格」距離推薦改複用 recommendSlots 至 armedReco，亮格時標 🎯。）
 function openOccupiedMenu(day, slot, newPid, moveEid){
   const ents=plan.filter(e=>e.day===day&&e.slot===slot&&e.id!==moveEid); if(!ents.length) return;
   const first=getPlace(ents[0].placeId), nm=esc(first?first.name:'');
@@ -165,45 +128,93 @@ function openOccPanel(eid){
   const bench=places.filter(x=>x.id!==p.id && !CNXCore.isScheduled(x.id,plan) && x.area===p.area && !meta.backups.includes(x.id))
     .map(x=>({x, dd:CNXCore.distanceM(p,x)})).filter(o=>o.dd!=null).sort((a,b)=>a.dd-b.dd).slice(0,3);
   const f=x=>x>=1000?(x/1000).toFixed(1)+'km':x+'m';
-  const cand=(x,tag,dd)=>`<div class="op-cand ${tag?'bak':''}">${placeEmoji(x)} <span class="nm">${esc(x.name)}</span>${tag?'<span class="bktag">備案</span>':''}${x.tier?tierBadge(x.tier):''}<span class="meta">${dd!=null?f(dd):''}${costLabel(x.cost)?('・'+costLabel(x.cost)):''}</span><span class="swap" data-action="op-swap" data-pid="${x.id}">換它 ⇄</span>${tag?`<span class="bkdel" data-action="op-delbak" data-pid="${x.id}">✕</span>`:''}</div>`;
+  const cand=(x,tag,dd)=>{ const band=CNXCore.priceBandOf(x.cost&&x.cost.amount, TRIP.priceBands);   // 價格改價帶標籤（便宜/中價…比 NT$ 短）；備案改「左滑刪除」無 ✕（Vivian）
+    const mt=[dd!=null?f(dd):'', band?esc(band):''].filter(Boolean).join('・');
+    return `<div class="op-cand ${tag?'bak':''}"${tag?` data-bak="${x.id}"`:''}><div class="cand-body">${placeEmoji(x)} <span class="nm">${esc(x.name)}</span>${x.tier?tierBadge(x.tier):''}${mt?`<span class="meta">${mt}</span>`:''}<span class="swap" data-action="op-swap" data-pid="${x.id}">換</span></div>${tag?`<div class="cand-del" data-action="op-delbak" data-pid="${x.id}">刪除</div>`:''}</div>`; };
   let pkBlock='';
   if(meta.pk){ const ents=plan.filter(x=>x.day===e.day&&x.slot===e.slot);
     pkBlock=`<div class="op-seclab">⚔️ 2 選 1 裁決</div>`+ents.map(x=>{const pp=getPlace(x.placeId); if(!pp) return '';
-      return `<div class="op-cand">${placeEmoji(pp)} <span class="nm">${esc(pp.name)}</span><span class="meta">${costLabel(pp.cost)||'—'}・${esc(CNXCore.condenseHours(pp))}</span><span class="swap" data-action="op-keep" data-eid="${x.id}">留它 ✓</span></div>`;}).join(''); }
+      return `<div class="op-cand"><div class="cand-body">${placeEmoji(pp)} <span class="nm">${esc(pp.name)}</span><span class="meta">${costLabel(pp.cost)||'—'}・${esc(CNXCore.condenseHours(pp))}</span><span class="swap" data-action="op-keep" data-eid="${x.id}">留它</span></div></div>`;}).join(''); }
+  // 這格順序（▲▼ 點按排序，給點選模式；同格 2 家以上才出現）：小格子不塞鈕、控制放這個有空間的面板
+  const slotEnts=slotSort(plan.filter(x=>x.day===e.day&&x.slot===e.slot));
+  const orderBlock = slotEnts.length>=2 ? `<div class="op-seclab">↕ 這格順序（${slotEnts.length} 家）</div><div class="op-order">`+slotEnts.map((x,i)=>{ const xp=getPlace(x.placeId); if(!xp) return '';
+    return `<div class="opo${x.id===eid?' cur':''}"><span class="e">${placeEmoji(xp)}</span><span class="nm">${esc(xp.name)}</span><span class="opo-btns"><button data-action="reorder-up" data-eid="${x.id}"${i===0?' disabled':''} aria-label="上移">▲</button><button data-action="reorder-dn" data-eid="${x.id}"${i===slotEnts.length-1?' disabled':''} aria-label="下移">▼</button></span></div>`;
+  }).join('')+`</div>` : '';
   openSheet(`<div class="op">
-    <div class="t1"><span class="op-name">${placeEmoji(p)} ${esc(p.name)}</span><span class="when">${esc(d.label)}（${esc(d.wd)}）· ${esc(slotObj(e.slot).label)}</span></div>
-    <div class="facts">${esc(CNXCore.condenseHours(p))||'—'} ｜ ${costLabel(p.cost)||'—'}${memo?(' ｜ 💬 '+esc(memo)):''}</div>
+    <div class="t1"><span class="op-name">${placeEmoji(p)} ${esc(p.name)}${p.tier?tierBadge(p.tier):''}</span></div>
+    <div class="op-ctx">${esc(d.label)}（${esc(d.wd)}）· ${esc(slotObj(e.slot).label)}${p.area?(' · '+esc(regionLabel(p.area))):''}</div>
+    <div class="op-info-lines">
+      <div>🕐 ${esc(CNXCore.condenseHours(p))||'—'}</div>
+      <div>💰 ${costLabel(p.cost)||'—'}</div>
+      ${memo?`<div>💬 ${esc(memo)}</div>`:''}
+    </div>
+    <div class="op-acts">
+      <a class="oa" href="${esc(gmaps(p))}" target="_blank" rel="noopener">📍 Maps</a>
+      <span class="oa" data-action="op-move">↪ 改時間</span>
+      <span class="oa" data-action="op-edit">✎ 編輯</span>
+      <span class="oa dgr" data-action="op-remove">🗑 拿掉</span>
+    </div>
+    ${orderBlock}
     ${pkBlock}
-    <div class="op-big"><span data-action="op-move">↪ 移到別格</span><span class="danger" data-action="op-remove">🗑 回板凳</span></div>
-    <div class="op-seclab">⇄ 換將 — 這格的備案</div>
-    ${meta.backups.map(id=>{const x=getPlace(id); return x?cand(x,true,CNXCore.distanceM(p,x)):'';}).join('')}
-    ${meta.backups.length<2?`<div class="op-addbak" data-action="op-addbak">＋ 掛備案（最多 2）</div>`:''}
-    <div class="op-seclab">⇄ 換將 — 附近的板凳</div>
-    ${bench.map(o=>cand(o.x,false,o.dd)).join('')||'<div class="sd">同區沒有未排的候選</div>'}
-    <div class="op-minor"><span data-action="op-map">🗺️ 地圖看它</span><a href="${esc(gmaps(p))}" target="_blank" rel="noopener">🔗 Maps</a><span data-action="op-edit">✎ 編輯卡片</span></div>
-  </div>`);
+    <div class="op-swap">
+      <div class="op-seclab">↔ 換成別家</div>
+      ${meta.backups.map(id=>{const x=getPlace(id); return x?cand(x,true,CNXCore.distanceM(p,x)):'';}).join('')}
+      ${meta.backups.length<2?`<div class="op-addbak" data-action="op-addbak">＋ 掛備案（最多 2）</div>`:''}
+      ${bench.map(o=>cand(o.x,false,o.dd)).join('')||'<div class="sd">同區沒有未排的候選</div>'}
+    </div>
+  </div>`, ()=>openOccPanel(eid), 'occ');
   sh.dataset.opEid=eid;
   autoSpot(CNXCore.occSpotlightIds(av(), eid, places));   // 占用面板→占用者＋備案＋2選1 一起亮
 }
-ov.addEventListener('click',e=>{ if(e.target===ov) closeSheet(); });
+ov.addEventListener('click',e=>{ if(e.target!==ov) return; if(sh.dataset.wkKind||sh.dataset.emCat){ openConfig(); } else { closeSheet(); } });   // 選色／選圖示頁點背景＝回設定清單（與 ✕ 一致、不整個關，Vivian #4）
 // 全域 Escape：有 sheet/overlay（細看/挑選器/編輯卡/版本…）開著就關它。單一 document 級處理器
 function sheetOpen(){ return ov.classList.contains('on'); }
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape') return;
-  if(sheetOpen()){ closeSheet(); e.preventDefault(); return; }   // sheet 優先（手機細看/挑選器/編輯卡…）
+  if(sheetOpen()){ if(sh.dataset.wkKind||sh.dataset.emCat){ openConfig(); } else { closeSheet(); } e.preventDefault(); return; }   // sheet 優先；選色/選圖示頁回設定（與 ✕/點背景一致，非整頁關——Vivian：Esc 別全關）
+  if(typeof armed!=='undefined' && armed){ disarm(); e.preventDefault(); return; }   // 待命狀態（排入/移動）Esc 跳出（Vivian）；此時無 sheet（enterArm 已 closeSheet）
   if(document.body.classList.contains('has-detail')){ closeDetail(); e.preventDefault(); }   // 桌機右欄細看
 });
 // 卡片 icon 的 emoji 選單，依分類排列（收合、點才展開；不夠用可直接在欄位打字／用系統 emoji 鍵盤）
+// 和色庫（Vivian 2026-06-21 從和色庫挑定、widget 認可）：地區/類別/tier 取色器共用；9 色相群、約 100 經典和色。她日後可在設定增刪（之後再做）。
+const WASHOKU_LIB=[
+ {label:'紅',colors:[['茜色','#b7282e'],['紅','#c9171e'],['韓紅','#e2041b'],['緋色','#d3381c'],['真朱','#ec6d51'],['臙脂','#b94047'],['蘇芳','#9e3d3f'],['銀朱','#bf3232'],['深緋','#ad3140'],['浅緋','#df7163']]},
+ {label:'橙・茶',colors:[['柿色','#ed6d3d'],['朱色','#eb6101'],['纁','#ed784a'],['橙色','#ee7800'],['柑子色','#f8b862'],['萱草色','#fc9f4d'],['杏色','#f7b977'],['琥珀色','#bb5535'],['駱駝色','#bf794e'],['煉瓦色','#b55233'],['樺色','#b64925'],['茶色','#965042'],['焦茶','#6f4b3e'],['枯茶','#8d6449']]},
+ {label:'黃',colors:[['山吹色','#f8b500'],['黄色','#ffd900'],['鬱金','#fabf14'],['刈安','#f5e56b'],['菜の花色','#ffec47'],['玉子色','#fcd575'],['砥粉色','#e4d2ad'],['黄檗','#d9cd90'],['金茶','#e29c45'],['芥子色','#cd9a36'],['鳥の子色','#fff1cf']]},
+ {label:'綠',colors:[['千歳緑','#3b7960'],['萌黄','#aacf53'],['若草色','#c3d825'],['草色','#7b8d42'],['抹茶色','#c5c56a'],['鶯色','#928c36'],['苔色','#69821b'],['常磐色','#007b43'],['緑青','#47885e'],['青丹','#90b44b'],['松葉色','#839b5c'],['若竹色','#68be8d'],['青磁色','#7ebeab']]},
+ {label:'青',colors:[['浅葱色','#00a3af'],['新橋色','#59b9c6'],['納戸色','#008899'],['青緑','#00aa90'],['水色','#bce2e8'],['甕覗','#a2d7dd'],['白群','#83ccd2'],['青竹色','#7ebea5'],['錆浅葱','#5c9291'],['御召茶','#43676b'],['鉄色','#005243']]},
+ {label:'藍',colors:[['縹色','#2792c3'],['露草色','#38a1db'],['空色','#a0d8ef'],['勿忘草','#89c3eb'],['群青色','#4d4398'],['瑠璃色','#1e50a2'],['藍色','#165e83'],['紺色','#223a70'],['杜若','#3e62ad'],['紺青','#192f60']]},
+ {label:'紫',colors:[['藤色','#8b81c3'],['菫色','#7058a3'],['江戸紫','#745399'],['古代紫','#895b8a'],['桔梗色','#5654a2'],['楝色','#95859c'],['滅紫','#594255'],['紫','#884898'],['葡萄色','#522f60'],['二藍','#915c8b'],['藤紫','#a59aca']]},
+ {label:'粉',colors:[['桜色','#fef4f4'],['紅梅色','#f2a0a1'],['鴇色','#f4b3c2'],['撫子','#eebbcb'],['珊瑚色','#f5b1aa'],['一斤染','#f5b199'],['桃色','#f09199'],['退紅','#e597b2'],['薄紅','#e87a90'],['牡丹色','#e0467f'],['長春色','#c97586']]},
+ {label:'中性',colors:[['鈍色','#6e6f72'],['銀鼠','#91989f'],['鼠色','#949495'],['利休鼠','#888e7e'],['灰色','#7d7d7d'],['白鼠','#dcdddd'],['胡粉色','#f7f7f2'],['生成色','#fbf7ef'],['象牙色','#f8f4e6'],['砂色','#dcd3b2'],['亜麻色','#d7c4bb'],['藍鼠','#6c848d'],['墨','#1c1c1c'],['消炭色','#524e4d']]}
+];
+const WASHOKU_NAMED={'#4c6cb3':'群青色','#e95464':'韓紅'};   // 她 6/21 挑的色裡有「和色庫已有同名、但 hex 不同」的（群青/韓紅）；用對照表正名（colordic 查證），不在選色盤塞重複名
+function washokuName(hex){ hex=(hex||'').toLowerCase(); if(WASHOKU_NAMED[hex]) return WASHOKU_NAMED[hex]; for(const g of WASHOKU_LIB){ for(const c of g.colors){ if(c[1].toLowerCase()===hex) return c[0]; } } return hex; }
+function wkCellHTML(name,hex,on){ return `<div class="wk-cell${on?' on':''}" data-action="pick-washoku" data-hex="${esc(hex)}" data-name="${esc(name)}"><div class="wk-sw" style="background:${esc(hex)}"></div><div class="wk-nm">${esc(name)}</div></div>`; }
+function washokuPickerHTML(label,current){
+  const cur=(current||'').toLowerCase();
+  const anchor = current ? `<div class="wk-g"><div class="wk-gl">目前</div><div class="wk-row">${wkCellHTML(washokuName(current),current,true)}</div></div>` : '';   // 目前色釘在最上、打勾、可點回（她怕改了找不回，Vivian #1）
+  const board=WASHOKU_LIB.map(g=>`<div class="wk-g"><div class="wk-gl">${esc(g.label)}</div><div class="wk-row">${g.colors.map(c=>wkCellHTML(c[0],c[1],c[1].toLowerCase()===cur)).join('')}</div></div>`).join('');
+  return `<h3>選顏色 · ${esc(label)}</h3><div class="wk-board">${anchor}${board}</div>`;
+}
+function openWashokuPicker(kind,key,label,current){ openSheet(washokuPickerHTML(label,current)); sh.classList.add('tall'); sh.dataset.wkKind=kind; sh.dataset.wkKey=key||''; const x=sh.querySelector('.sheetclose'); if(x){ x.dataset.action='wpick-back'; x.setAttribute('aria-label','返回設定'); } }   // ✕ 改成回設定清單（非整個關掉，Vivian #2）
+// 類別圖示選擇器：同卡片編輯的 emoji 邏輯（⭐常用＋庫分類），以 sheet 呈現；✕／點背景＝回設定（Vivian #3）
+function catEmojiPickerHTML(label,current){
+  const star=`<div class="emojicat">⭐ 常用</div><div class="emojigrid"><span class="emojibtn dflt" data-action="pick-cat-emoji" data-emoji="📍">📍 預設</span>${(TRIP.emojiList||[]).map(em=>`<span class="emojibtn${em===current?' on':''}" data-action="pick-cat-emoji" data-emoji="${esc(em)}">${esc(em)}</span>`).join('')}</div>`;
+  const lib=EMOJI_CATS.map(c=>`<div class="emojicat">${esc(c.label)}</div><div class="emojigrid">${c.emojis.map(em=>`<span class="emojibtn${em===current?' on':''}" data-action="pick-cat-emoji" data-emoji="${em}">${em}</span>`).join('')}</div>`).join('');
+  return `<h3>選圖示 · ${esc(label)}</h3>${star}<details class="emojilib" open><summary>更多分類…</summary>${lib}</details>`;
+}
+function openCatEmojiPicker(catKey){ const c=findCat(catKey); openSheet(catEmojiPickerHTML('類別・'+(c?c.label:''), c?c.icon:'')); sh.classList.add('tall'); sh.dataset.emCat=catKey; const x=sh.querySelector('.sheetclose'); if(x){ x.dataset.action='wpick-back'; x.setAttribute('aria-label','返回設定'); } }
+// 庫＝「常用」之外的 fallback，按 Vivian 的類別精選清邁會用到的（砍掉原本一大堆甜點/水果/速食）
 const EMOJI_CATS=[
-  {label:'食物',emojis:['🍜','🍲','🍛','🥘','🍢','🍡','🥟','🍳','🌶️','🍤','🍗','🍖','🥩','🥗','🍚','🍙','🍱','🍝','🌯','🥪','🍔','🍟','🍕','🌭','🥞','🧇','🥨','🥐','🍞','🧀','🥚','🥓','🍣','🍥','🥠']},
-  {label:'甜點/水果',emojis:['🍦','🍧','🍨','🍩','🍪','🎂','🍰','🧁','🥧','🍮','🍯','🍫','🍬','🍭','🍓','🍉','🍊','🍋','🍌','🍍','🥭','🍑','🍒','🥥','🥝','🍅','🥑','🍇','🍈','🥕']},
-  {label:'飲料',emojis:['☕','🍵','🧋','🥤','🧃','🍹','🍸','🍺','🍻','🍷','🥂','🍶','🥃','🧉','🍾','🥛']},
-  {label:'景點/自然',emojis:['🛕','⛩️','🏯','🏰','🏛️','⛪','🕌','🗿','🌅','🌄','🏞️','🏔️','⛰️','🌋','🏖️','🏝️','🌳','🌲','🌴','🌵','🌸','🌺','🌻','🌷','🍀','🍁','🐘','🐅','🦋','🐢','🐠','🐬','🦜','♨️','💦','🌊']},
-  {label:'活動/娛樂',emojis:['💆','🧖','💅','🛀','🎉','🎊','🎭','🎨','🖼️','🎵','🎶','🎤','🎸','🥁','🎮','🎡','🎢','🎠','🛶','🚣','🏊','🚴','🥾','🧘','📷','📸','🎬','🎫','🎯']},
-  {label:'購物',emojis:['🛍️','🛒','🏪','🏬','🧺','🎁','👗','👚','👕','👖','👜','👠','👟','💄','💍','💎','🧵','🧶','🕶️','🧢','🌂']},
-  {label:'住宿',emojis:['🏨','🏩','🛏️','🛌','🏡','🏠','🏚️','⛺','🏕️','🛖','🗝️']},
-  {label:'交通',emojis:['✈️','🛫','🛬','🚕','🚗','🚙','🛵','🏍️','🚌','🚎','🚐','🚉','🚆','🚊','🚲','⛴️','🚤','🛺','🗺️','📍','🧭','🛟']},
-  {label:'符號/其他',emojis:['⭐','🌟','✨','❤️','🧡','💛','💚','💙','💜','🔥','💧','☀️','🌙','⛅','☔','❄️','✅','❗','❓','💡','📝','📌','🔖','🏆','🥇','💵','💰','🧳','🕐','🌈']}
+  {label:'食物',emojis:['🍜','🍲','🍛','🥘','🍢','🍳','🌶️','🍤','🍗','🥗','🍱','🥟','🍚','🥩','🍞','🍙']},
+  {label:'咖啡／飲料',emojis:['☕','🍵','🧋','🥤','🍹','🍸','🍺','🥥','🧃','🥛']},
+  {label:'景點／自然',emojis:['🛕','⛩️','🏛️','🏯','🗿','🌅','🏞️','🌳','🌴','🐘','♨️','🌊','🏖️','🌸','🦋']},
+  {label:'娛樂／按摩',emojis:['💆','🧖','💅','🛀','🧘','🏋️','🎉','🎵','🎤','🎫','📸','🎯','🎬']},
+  {label:'逛街',emojis:['🛍️','🛒','🏪','🏬','🎁','👗','👜','💍','🕶️','🧺']},
+  {label:'住宿',emojis:['🏨','🏩','🛏️','🏡','🗝️','⛺','🛖']},
+  {label:'交通',emojis:['✈️','🚗','🚕','🛵','🚌','🚲','🛺','⛴️','🗺️','📍','🧭']},
+  {label:'標記／其他',emojis:['⭐','❤️','🔥','☀️','🌙','💰','📝','✅','⚠️','🕐','💤','💼','📌']}
 ];
 
 // ── 檢視卡 detailSheet（Task 16）：六區塊瘦身——標題+Tier／💬memo／事實行（具體時間+公休｜NT$/人｜區域）／菜系 chip／排程狀態／矮小動作列 ──
@@ -211,22 +222,26 @@ function closedTxt(p){ if(!(Array.isArray(p.closedDays)&&p.closedDays.length)) r
 function detailSheet(id){
   const p=getPlace(id); if(!p) return;
   const memo=(p.note||'').split('\n')[0].trim();
+  const band=CNXCore.priceBandOf(p.cost&&p.cost.amount, TRIP.priceBands);
   const costTxt=costLabel(p.cost)||'—';
-  const facts=`${esc(p.hours||'—')}${closedTxt(p)} ｜ ${costTxt} ｜ ${esc(regionLabel(p.area)||'—')}`;
   const sc=placeSched(id);
-  const schedTxt = sc.length ? ('📅 已排：'+esc(sc.join('、'))) : '未排入';
-  const h=`<div class="vcard">
-    <h3>${placeEmoji(p)} ${esc(p.name)}${p.tier?' '+tierBadge(p.tier):''}</h3>
-    ${memo?`<div class="vmemo">💬 ${esc(memo)}</div>`:''}
-    <div class="vfacts">${facts}</div>
-    ${p.cuisine?`<div class="vtags"><span class="vcui">${esc(cuisineLabel(p.cuisine))}</span></div>`:''}
-    <div class="vsched${sc.length?'':' none'}">${schedTxt}</div>
-    <div class="vacts">
-      <span class="pill pri" data-action="detail-assign" data-id="${p.id}">📅 排入</span>
-      <span class="pill" data-action="detail-map" data-id="${p.id}">🗺️ 地圖看它</span>
-      <a class="pill" href="${esc(gmaps(p))}" target="_blank" rel="noopener">🔗 Maps</a>
-      <span class="pill" data-action="detail-edit" data-id="${p.id}">✎</span>
-    </div></div>`;
+  const schedTxt = sc.length ? ('📅 已排：'+esc(sc.join('、'))) : '尚未排入行程';
+  // 檢視卡＝換將中心同款 info-first（給「還沒排的店」、主動作＝排入）；無「地圖看它」（點卡已自動亮、bug#3）
+  const h=`<div class="op">
+    <div class="t1"><span class="op-name">${placeEmoji(p)} ${esc(p.name)}${p.tier?tierBadge(p.tier):''}</span></div>
+    <div class="op-ctx">${esc(regionLabel(p.area)||'—')}</div>
+    <div class="op-info-lines">
+      <div>🕐 ${esc(p.hours||'—')}${closedTxt(p)}</div>
+      <div>💰 ${costTxt}${band?('　'+esc(band)):''}</div>
+      ${memo?`<div>💬 ${esc(memo)}</div>`:''}
+    </div>
+    <div class="op-sched${sc.length?'':' none'}">${schedTxt}</div>
+    <div class="op-acts">
+      <span class="oa pri" data-action="detail-assign" data-id="${p.id}">📅 排入</span>
+      <a class="oa" href="${esc(gmaps(p))}" target="_blank" rel="noopener">📍 Maps</a>
+      <span class="oa" data-action="detail-edit" data-id="${p.id}">✎ 編輯</span>
+    </div>
+  </div>`;
   openSheet(h);
   autoSpot(id);                 // 看卡片→自動亮該卡 pin（沒定位則靜默跳過）
 }
@@ -240,32 +255,26 @@ function openEdit(id,addTarget,prefill){
   pendingPrefill=(!id&&prefill)?prefill:null;
   const isNew=!id; const p=isNew?CNXCore.normalizePlace(prefill||{type:'其他'}):getPlace(id);
   const nameVal=isNew?((prefill&&prefill.name)||''):p.name;
-  const cuisines=(TRIP.cuisinesList||[]);
-  const curCui=p.cuisine||null;
   const body=`<h3>${isNew?'新增地點':'編輯卡片'}</h3>
   <div class="seclabel">名稱（暱稱）</div>
-  <div class="iconrow"><input class="em" id="ed_icon" value="${esc(p.icon||'')}" placeholder="${esc(temoji(p.type))}"><input id="ed_name" style="flex:1;margin:0" value="${esc(nameVal)}" placeholder="地點／店名"><button type="button" class="iconpickbtn" data-action="toggle-emoji">選 emoji ▾</button></div>
-  <div id="emojiPanel" class="emojipanel" style="display:none"><div class="emojigrid" style="margin-bottom:2px"><span class="emojibtn dflt" data-action="pick-emoji" data-emoji="">↺ 用類別預設</span></div>${EMOJI_CATS.map(c=>`<div class="emojicat">${c.label}</div><div class="emojigrid">${c.emojis.map(em=>`<span class="emojibtn" data-action="pick-emoji" data-emoji="${em}">${em}</span>`).join('')}</div>`).join('')}</div>
+  <div class="iconrow"><button type="button" class="emojibox" id="ed_iconbox" data-action="toggle-emoji" aria-label="選 emoji（點開選擇器）">${esc(p.icon||temoji(p.type))}</button><input id="ed_name" style="flex:1;margin:0" value="${esc(nameVal)}" placeholder="地點／店名"><input type="hidden" id="ed_icon" value="${esc(p.icon||'')}"></div>
+  <div id="emojiPanel" class="emojipanel" style="display:none"><div class="emojicat">⭐ 常用<span class="emojicfg-hint" data-action="open-cfg" data-tab="emoji">在設定編輯 →</span></div><div class="emojigrid"><span class="emojibtn dflt" data-action="pick-emoji" data-emoji="">↺ 預設</span>${(TRIP.emojiList||[]).map(em=>`<span class="emojibtn" data-action="pick-emoji" data-emoji="${esc(em)}">${esc(em)}</span>`).join('')}</div><details class="emojilib"><summary>更多分類…</summary>${EMOJI_CATS.map(c=>`<div class="emojicat">${c.label}</div><div class="emojigrid">${c.emojis.map(em=>`<span class="emojibtn" data-action="pick-emoji" data-emoji="${em}">${em}</span>`).join('')}</div>`).join('')}</details></div>
   <div class="seclabel">備註 / memo（第一行會顯示在卡片上）</div>
   <textarea id="ed_note" rows="2" placeholder="選填">${esc(p.note||'')}</textarea>
-  <div class="seclabel">菜系</div>
-  <div class="row" id="ed_cuirow" style="margin-bottom:8px">${cuisines.map(c=>`<span class="chip ${curCui===c.key?'on':''}" data-action="ed-cui" data-cui="${esc(c.key)}">${esc(c.label)}</span>`).join('')}<span class="chip ${curCui==null?'on':''}" data-action="ed-cui" data-cui="">無</span></div>
   <div class="seclabel">Tier（你來標：①一定去 ②滿想去 ③順路 ④可不去）</div>
   <div class="row" id="ed_tierrow" style="margin-bottom:8px">${[1,2,3,4,0].map(n=>`<span class="tchip ed-t t${n} ${((p.tier||0)===n)?'on':''}" data-action="ed-tier" data-tier="${n}">${n===0?'未分':('T'+n+' '+['','一定去','滿想去','順路','可不去'][n])}</span>`).join('')}</div>
   <div class="seclabel">每人價格（NT$）</div>
-  <input id="ed_amount" inputmode="numeric" value="${p.cost&&p.cost.amount!=null?p.cost.amount:''}" placeholder="例如 350">
-  <div class="row" style="margin-bottom:4px"><span class="chip ${(!p.cost||p.cost.per!=='shared')?'on':''}" data-action="ed-per" data-per="person">每人</span><span class="chip ${(p.cost&&p.cost.per==='shared')?'on':''}" data-action="ed-per" data-per="shared">共用（房/車）</span></div>
-  <div class="seclabel">連結（Google Maps）${p.placeId?'<span class="auto">已驗證 ✓</span>':''}</div>
-  <input id="ed_link" value="${esc(p.mapsUrl||'')}" placeholder="貼 Maps 連結（手機分享的也可以）">
+  <div class="priceRow"><input id="ed_amount" inputmode="numeric" value="${p.cost&&p.cost.amount!=null?p.cost.amount:''}" placeholder="例如 350" style="flex:1;margin:0"><span class="chip ${(!p.cost||p.cost.per!=='shared')?'on':''}" data-action="ed-per" data-per="person">每人</span><span class="chip ${(p.cost&&p.cost.per==='shared')?'on':''}" data-action="ed-per" data-per="shared">共用</span></div>
+  <details class="ed-link"${p.placeId?'':' open'}><summary class="seclabel">連結（Google Maps）${p.placeId?'<span class="auto">已驗證 ✓</span>':''}</summary>
+  <input id="ed_link" value="${esc(p.mapsUrl||'')}" placeholder="貼 Maps 連結（手機分享的也可以）"></details>
   <div class="seclabel">營業時間</div><input id="ed_hours" value="${esc(p.hours||'')}" placeholder="選填">
   <div class="two"><div><div class="seclabel">區域</div><select id="ed_area">${regionsList().map(r=>`<option value="${esc(r.key)}" ${r.key===p.area?'selected':''}>${esc(r.label)}</option>`).join('')}</select></div>
   <div><div class="seclabel">類型</div><select id="ed_type">${categoriesList().map(c=>`<option value="${esc(c.key)}" ${c.key===p.type?'selected':''}>${esc(c.icon)} ${esc(c.label)}</option>`).join('')}</select></div></div>
   <label class="ed-hide"><input type="checkbox" id="ed_hide"${p.hideInOverview?' checked':''}> 不在總覽顯示（仍會留在這天的細看）</label>`;
   const foot=`<div class="edfoot">${isNew?'':`<span class="pill del" data-action="del-card" data-id="${id}">🗑</span>`}<span class="pill cancel" data-action="close">取消</span><span class="pill save" data-action="save-edit" data-id="${isNew?'__new__':id}">${isNew?'新增':'儲存'}</span></div>`;
   openSheet(`<div class="edscroll">${body}</div>${foot}`);
-  sh.classList.add('sheet-edit');
-  sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tier=(p.tier?String(p.tier):''); sh.dataset.cui=(curCui||'');
-  autoSpot(id,{edit:true});     // 編輯卡→自動亮該卡 pin（地圖小窗更薄）；新卡 id=null → 靜默跳過
+  sh.classList.add('sheet-edit','tall');   // 編輯＝高表單；不進地圖共視（手機才不會擠成小一塊・Vivian 真機 #3）
+  sh.dataset.per=(p.cost&&p.cost.per==='shared')?'shared':'person'; sh.dataset.tier=(p.tier?String(p.tier):'');
 }
 
 // ── 貼連結建卡（切片2 Task5）：Edge Function 解析→去重→預填 openEdit ──
@@ -276,7 +285,8 @@ function openLinkPrompt(addTarget){
   openSheet(`<h3>🔗 貼連結建卡</h3>
     <div class="sd">貼 Google Maps 連結（手機分享的短連結也可以），自動解析建卡。</div>
     <input id="lnk_url" placeholder="https://maps.app.goo.gl/… 或長連結" style="margin-bottom:10px">
-    <div class="row"><span class="pill pri" data-action="lnk-go"${addTarget?` data-day="${esc(addTarget.day)}" data-slot="${esc(addTarget.slot)}"`:''}>建卡</span></div>`);
+    <div class="row"><span class="pill pri" data-action="lnk-go"${addTarget?` data-day="${esc(addTarget.day)}" data-slot="${esc(addTarget.slot)}"`:''}>建卡</span></div>
+    <div class="hint">自動帶出：店名・座標・地區・類別（解析後可再改）</div>`);
   setTimeout(()=>{ const el=document.getElementById('lnk_url'); if(el) el.focus(); },50);
 }
 
@@ -316,8 +326,14 @@ async function resolveAndCreate(url, addTarget){
 function promptDuplicate(dup,data,addTarget){
   pendingResolve={data,addTarget};
   const canLocate=(dup.lat==null||dup.lng==null||!dup.placeId)&&(data.lat!=null);
+  const newReg=(data.lat!=null)?(regionLabel(CNXCore.nearestRegion(TRIP,data.lat,data.lng))||''):'';   // 新貼的：座標就近判區域，給對照
+  const dupReg=regionLabel(dup.area)||'';
   openSheet(`<h3>這家好像已經有卡了</h3>
-    <div class="sd">既有：${esc(dup.icon||temoji(dup.type))} ${esc(dup.name)}</div>
+    <div class="dupcmp">
+      <div class="duprow"><span class="duplab new">你剛貼</span><span class="dupnm">${esc(data.name||'未命名')}</span>${newReg?`<span class="dupmeta">${esc(newReg)}</span>`:''}</div>
+      <div class="duprow"><span class="duplab old">既有卡</span><span class="dupnm">${esc(dup.icon||temoji(dup.type))} ${esc(dup.name)}</span>${dupReg?`<span class="dupmeta">${esc(dupReg)}</span>`:''}</div>
+    </div>
+    <div class="sd">同一家＝開既有卡；不同家（例如別分店）＝仍建新卡。</div>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <span class="pill pri" data-action="dup-open" data-id="${esc(dup.id)}">開既有卡</span>
       ${canLocate?`<span class="pill" data-action="dup-locate" data-id="${esc(dup.id)}">補定位到它</span>`:''}
@@ -327,7 +343,7 @@ function promptDuplicate(dup,data,addTarget){
 
 function openImpExp(){
   const data=JSON.stringify(getLocalDb(),null,2);   // 全量備份（trip/places/manualLines/settings/versions），可整包還原
-  let h=`<h3>匯入／匯出</h3><div class="sd">匯出＝整份備份（行程/卡片/版本/設定）。匯入：整包 → 取代還原；只有 {"places":[…]}／[…] → 併入卡片。</div>
+  let h=`<h3>⤓⤒ 匯入／匯出</h3><div class="sd">匯出＝整份備份（行程/卡片/版本/設定）。匯入：整包 → 取代還原；只有 {"places":[…]}／[…] → 併入卡片。</div>
   <div class="seclabel">⤓ 匯出（整份備份）</div><textarea class="code" id="exp" readonly>${esc(data)}</textarea>
   <div class="row" style="margin-bottom:12px"><span class="pill pri" data-action="copy-export">複製</span></div>
   <div class="seclabel">⤒ 匯入（貼上備份或 Claude 給的卡片 JSON）</div><textarea class="code" id="imp" placeholder='貼上整份備份，或 {"places":[...]} ／ [...] '></textarea>
@@ -351,8 +367,8 @@ function openVersions(){
   const curId=av().id;
   let h=`<h3>🗂️ 版本</h3><div class="sd">各版自己的排法＋基地＋預算，互不影響。目前看哪一版只記在這台裝置。</div>`;
   DB.versions.forEach(v=>{ const cur=v.id===curId;
-    h+=`<div class="opt" data-action="switchver" data-id="${v.id}"><span style="flex:none;width:11px;height:11px;border-radius:50%;margin-top:3px;background:${cur?'#2e9e7d':'#d8d0c2'}"></span><div style="flex:1">${esc(v.name)}${cur?' <span style="font-size:11px;color:#2e9e7d;font-weight:700">· 目前</span>':''}<small>${baseSummary(v)}<br>${esc(versionStats(v))}</small></div></div>`;
+    h+=`<div class="vrow${cur?' cur':''}" data-action="switchver" data-id="${v.id}"><span class="vn">${esc(v.name)}</span>${cur?'<span class="vcur">目前</span>':''}<div class="vsub">${baseSummary(v)} · ${esc(versionStats(v))}</div></div>`;
   });
-  h+=`<div class="row" style="margin-top:10px"><span class="pill pri" data-action="dupver">＋ 複製目前成新版本</span><span class="pill" data-action="renamever">✎ 重命名</span>${DB.versions.length>1?'<span class="pill danger" data-action="delver">🗑 刪除目前</span>':''}</div>`;   // 去除底部重複關閉（右上角一致關閉鈕）
+  h+=`<div class="eqacts"><span class="pill" data-action="dupver">＋ 複製成新版</span><span class="pill" data-action="renamever">✎ 重命名</span>${DB.versions.length>1?'<span class="pill danger" data-action="delver">🗑 刪除</span>':''}</div>`;   // 等寬動作列（右上角一致關閉鈕，不重複底部關閉）
   openSheet(h);
 }

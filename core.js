@@ -160,11 +160,30 @@
     return { key:a.label, label:a.label, color:a.color, lat:a.lat, lng:a.lng, desc:'' };
   });
   CM_TRIP_DEFAULT.cuisinesV18 = CM_TRIP_DEFAULT.cuisines.map(function (c) { return { key:c, label:c, desc:'' }; });
+  // 常用 emoji 種子＝她資料用過的（🛕🧘🍹🏋️🚗💼🗝️💤）＋清邁行程高頻；可在設定增刪
+  CM_TRIP_DEFAULT.emojiListDefault = ['🛕','⛩️','☕','🍜','🍲','🥘','🍢','🌶️','🧋','🍺','🍹','🌃','💆','🧘','🏋️','🛍️','🏨','🗝️','🚗','🛵','💼','🌅','♨️','💤','📍','⭐'];
   CM_TRIP_DEFAULT.priceBandsV18 = normPriceBands(CM_TRIP_DEFAULT.priceBands);
+  // 「和色」初始色盤（Vivian 2026-06-21 從和色庫挑定）：normalizeTrip 一次性套用 by key，套完標記 paletteWashoku；之後她在設定改色不會被蓋
+  var WASHOKU_REGION = { '古城':'#ed784a', '北/東北':'#00aa90', '尼曼/西':'#58b2dc', '濱河/東':'#4c6cb3', '南郊':'#f8b500', '東郊':'#90b44b', '其他':'#d7c4bb' };
+  var WASHOKU_CAT = { '食物':'#fc9f4d', '景點':'#7ebeab', '娛樂':'#e95464', '逛街':'#f4b3c2', '住宿':'#6a9bd1', '其他':'#d7c4bb' };
+  // tier 四色資料化（Vivian 可在設定改）：fg＝章/字色、bg＝tbadge 淡底；預設＝她挑定的和色，須與 styles.css :root 的 --tN-fg/bg 一致（CSS 值為無 JS 後備）
+  var TIER_COLORS_DEFAULT = {
+    t1:{fg:'#b7282e', bg:'#f6dcdc'}, t2:{fg:'#ed6d3d', bg:'#fbe2d5'},
+    t3:{fg:'#3b7960', bg:'#dae9e2'}, t4:{fg:'#6e6f72', bg:'#e6e6e9'}
+  };
+  function normTierColors(tc) {
+    tc = (tc && typeof tc === 'object') ? tc : {};
+    var out = {};
+    ['t1','t2','t3','t4'].forEach(function (k) {
+      var v = (tc[k] && typeof tc[k] === 'object') ? tc[k] : {};
+      out[k] = { fg: safeColor(v.fg, TIER_COLORS_DEFAULT[k].fg), bg: safeColor(v.bg, TIER_COLORS_DEFAULT[k].bg) };
+    });
+    return out;
+  }
   function normalizeTrip(t) {
     t = (t && typeof t === 'object') ? t : {};
     var d = CM_TRIP_DEFAULT;
-    return {
+    var trip = {
       name: t.name || d.name, startDate: t.startDate || d.startDate, endDate: t.endDate || d.endDate,
       currency: t.currency || d.currency,
       mapCenter: (t.mapCenter && typeof t.mapCenter.lat === 'number') ? t.mapCenter : Object.assign({}, d.mapCenter),
@@ -172,8 +191,20 @@
       priceBands: normPriceBands((t.priceBands && typeof t.priceBands === 'object' && Object.keys(t.priceBands).length) ? t.priceBands : d.priceBandsV18),
       categories: (Array.isArray(t.categories) && t.categories.length) ? t.categories.map(safeCategory).filter(Boolean) : JSON.parse(JSON.stringify(d.categories)),
       regions: (Array.isArray(t.regions) && t.regions.length) ? t.regions.map(safeRegion).filter(Boolean) : JSON.parse(JSON.stringify(d.regions)),
-      cuisinesList: (Array.isArray(t.cuisinesList) && t.cuisinesList.length) ? t.cuisinesList.map(safeCuisine).filter(Boolean) : JSON.parse(JSON.stringify(d.cuisinesV18))
+      cuisinesList: (Array.isArray(t.cuisinesList) && t.cuisinesList.length) ? t.cuisinesList.map(safeCuisine).filter(Boolean) : JSON.parse(JSON.stringify(d.cuisinesV18)),
+      emojiList: (Array.isArray(t.emojiList) && t.emojiList.length) ? t.emojiList.filter(function(e){return typeof e==='string'&&e.trim();}).slice(0,80) : JSON.parse(JSON.stringify(d.emojiListDefault)),
+      tierColors: normTierColors(t.tierColors),   // tier 四色（缺席→預設和色；app 層注入 CSS 變數 --tN-fg/bg）
+      paletteWashoku: !!t.paletteWashoku   // 和色初始色盤是否已套（app 層 applyWashokuPalette 一次性套用、見下）；此處僅保留旗標、不在淨化時動色（免污染 migrate/預設）
     };
+    return trip;
+  }
+  // 一次性把和色初始色盤（Vivian 挑定）套進 regions/categories（by key）；已套過(flag)即跳過，回傳是否有變動（app 載入時呼叫、有變動才 save；之後她在設定改色 flag 已 true 不會被蓋）
+  function applyWashokuPalette(trip) {
+    if (!trip || trip.paletteWashoku) return false;
+    (trip.regions || []).forEach(function (r) { if (WASHOKU_REGION[r.key]) r.color = WASHOKU_REGION[r.key]; });
+    (trip.categories || []).forEach(function (c) { if (WASHOKU_CAT[c.key]) c.color = WASHOKU_CAT[c.key]; });
+    trip.paletteWashoku = true;
+    return true;
   }
   function deriveDays(trip) {
     var out = [];
@@ -563,6 +594,123 @@
   // dayId 為零補 MMDD 字串；同一年內字典序＝時序
   function baseForDay(base, dayId) {
     return (base || []).filter(function (s) { return s.fromDay <= dayId && dayId <= s.toDay; })[0] || null;
+  }
+
+  // ── 住宿段晚數模型：共用「算每段晚數→重分配(cascade)→重鋪 fromDay/toDay」。days＝deriveDays 有序陣列。──
+  // 規則層級（Vivian）：區域＝最上層。setRegionNights＝設「這區住幾晚」，相鄰區補 -delta；兩區各自把內部飯店 cascade 重分配（縮減從最後一家往前壓、每家≥1），所以縮區域時裡面飯店跟著壓、區域最少＝飯店數。
+  // setHotelNights＝只在「同一區內」調某家晚數，其他同區飯店補 -delta（這區總晚不變、絕不擠到別區）。
+  function _baseIdx(days) { var m = {}; for (var i = 0; i < days.length; i++) m[days[i].id] = i; return function (id) { return (id in m) ? m[id] : -1; }; }
+  function _orderedN(base, idx) { var o = base.slice().sort(function (a, b) { return a.fromDay < b.fromDay ? -1 : (a.fromDay > b.fromDay ? 1 : 0); }); for (var i = 0; i < o.length; i++) o[i]._n = idx(o[i].toDay) - idx(o[i].fromDay) + 1; return o; }
+  function _regionGroups(o) { var g = []; for (var i = 0; i < o.length; i++) { var c = g[g.length - 1]; if (c && c.region === o[i].region) c.segs.push(o[i]); else g.push({ region: o[i].region, segs: [o[i]] }); } return g; }
+  function _sumN(s) { var t = 0; for (var i = 0; i < s.length; i++) t += s[i]._n; return t; }
+  function _redistN(segs, T) { var d = T - _sumN(segs); if (d > 0) segs[segs.length - 1]._n += d; else if (d < 0) { var need = -d; for (var i = segs.length - 1; i >= 0 && need > 0; i--) { var take = Math.min(segs[i]._n - 1, need); segs[i]._n -= take; need -= take; } } }
+  function _retileN(o, days) { var cur = 0; for (var i = 0; i < o.length; i++) { var s = o[i]; s.fromDay = days[cur].id; s.toDay = days[cur + s._n - 1].id; cur += s._n; delete s._n; } }
+  function _dropN(o) { for (var i = 0; i < o.length; i++) delete o[i]._n; }
+  function setRegionNights(base, segId, nights, days) {
+    if (!Array.isArray(base) || !Array.isArray(days) || !base.length) return false;
+    var o = _orderedN(base, _baseIdx(days)), gps = _regionGroups(o);
+    var gi = -1; for (var i = 0; i < gps.length; i++) if (gps[i].segs.some(function (s) { return s.id === segId; })) { gi = i; break; }
+    if (gi < 0) { _dropN(o); return false; }
+    var G = gps[gi], adj = gps[gi + 1] || gps[gi - 1];
+    if (!adj) { _dropN(o); return false; }   // 整趟只有這一區→改總晚＝改 trip（改起訖）
+    var curT = _sumN(G.segs), aT = _sumN(adj.segs);
+    nights = Math.max(G.segs.length, Math.min(curT + (aT - adj.segs.length), Math.round(nights)));   // 夾在 [這區飯店數, 現值+鄰區能讓出的]
+    if (nights === curT) { _dropN(o); return false; }
+    _redistN(G.segs, nights); _redistN(adj.segs, aT - (nights - curT)); _retileN(o, days); return true;
+  }
+  function setHotelNights(base, segId, nights, days) {
+    if (!Array.isArray(base) || !Array.isArray(days) || !base.length) return false;
+    var o = _orderedN(base, _baseIdx(days)), gps = _regionGroups(o);
+    var G = null, X = null; for (var i = 0; i < gps.length && !G; i++) for (var j = 0; j < gps[i].segs.length; j++) if (gps[i].segs[j].id === segId) { G = gps[i]; X = gps[i].segs[j]; break; }
+    if (!G || G.segs.length < 2) { _dropN(o); return false; }   // 單飯店區：飯店層不適用（改區域總晚即可）
+    var regionT = _sumN(G.segs), others = G.segs.filter(function (s) { return s !== X; });
+    nights = Math.max(1, Math.min(regionT - others.length, Math.round(nights)));   // 這家最多＝區總晚−其他每家1晚
+    if (nights === X._n) { _dropN(o); return false; }
+    X._n = nights; _redistN(others, regionT - nights); _retileN(o, days); return true;
+  }
+
+  // 按晚拆飯店：把 segId 那段的「最後一晚」拆成一個新段（同 region、待訂 hotelPlaceId=null），原段縮 1 晚。
+  // 回傳新段 id（成功）或 null（不足 2 晚不能拆）。newId 由呼叫端給（core 無 uid）。
+  function splitSegTail(base, segId, days, newId) {
+    if (!Array.isArray(base) || !Array.isArray(days)) return null;
+    var idx = function (id) { for (var i = 0; i < days.length; i++) if (days[i].id === id) return i; return -1; };
+    var seg = null; for (var k = 0; k < base.length; k++) if (base[k].id === segId) { seg = base[k]; break; }
+    if (!seg) return null;
+    var fi = idx(seg.fromDay), ti = idx(seg.toDay);
+    if (fi < 0 || ti < 0 || ti - fi < 1) return null;   // 不足 2 晚不能拆
+    base.push({ id: newId, region: seg.region, fromDay: days[ti].id, toDay: days[ti].id, hotelPlaceId: null });
+    seg.toDay = days[ti - 1].id;
+    return newId;
+  }
+
+  // 改起訖用：把住宿段裁到新範圍 [lo, hi]（dayId MMDD 字串、同年字典序＝時序）。全在範圍外→丟、左右越界→裁；補頭尾讓 base 鋪滿新範圍（按日期錨定：原本哪天屬哪區就留哪天，頭尾延伸/裁切）。
+  function refitBaseToRange(base, lo, hi) {
+    if (!Array.isArray(base)) return;
+    var kept = [];
+    for (var i = 0; i < base.length; i++) {
+      var s = base[i];
+      if (s.toDay < lo || s.fromDay > hi) continue;   // 全在新範圍外→丟
+      if (s.fromDay < lo) s.fromDay = lo;              // 左越界→裁
+      if (s.toDay > hi) s.toDay = hi;                  // 右越界→裁
+      kept.push(s);
+    }
+    kept.sort(function (a, b) { return a.fromDay < b.fromDay ? -1 : (a.fromDay > b.fromDay ? 1 : 0); });
+    if (kept.length) { kept[0].fromDay = lo; kept[kept.length - 1].toDay = hi; }   // 補頭尾缺口（頭段延到 lo、尾段延到 hi）
+    base.length = 0; for (var j = 0; j < kept.length; j++) base.push(kept[j]);
+  }
+
+  // 相鄰「同 region 且同一家飯店」的段→併成一段（連住同飯店不該顯示兩條，Vivian #3）。回傳是否有併。
+  function mergeBaseSegs(base) {
+    if (!Array.isArray(base) || base.length < 2) return false;
+    base.sort(function (a, b) { return a.fromDay < b.fromDay ? -1 : (a.fromDay > b.fromDay ? 1 : 0); });
+    var out = [base[0]], merged = false;
+    for (var i = 1; i < base.length; i++) {
+      var prev = out[out.length - 1], cur = base[i];
+      if (prev.region === cur.region && prev.hotelPlaceId && cur.hotelPlaceId && prev.hotelPlaceId === cur.hotelPlaceId) {
+        if (cur.toDay > prev.toDay) prev.toDay = cur.toDay;   // 吃掉後段（連住同飯店）
+        merged = true;
+      } else out.push(cur);
+    }
+    if (merged) { base.length = 0; for (var j = 0; j < out.length; j++) base.push(out[j]); }
+    return merged;
+  }
+  // 區內重排飯店順序（segIds＝某區塊內所有段 id 的新順序；保留各家晚數→重鋪，Vivian #2b 握把拖曳）。回傳是否成功。
+  function reorderRegionHotels(base, segIds, days) {
+    if (!Array.isArray(base) || !Array.isArray(days) || !Array.isArray(segIds) || segIds.length < 2) return false;
+    var o = _orderedN(base, _baseIdx(days)), idxs = [], regs = {};
+    for (var i = 0; i < o.length; i++) if (segIds.indexOf(o[i].id) >= 0) { idxs.push(i); regs[o[i].region] = 1; }
+    if (idxs.length !== segIds.length || Object.keys(regs).length !== 1) { _dropN(o); return false; }   // 必須剛好是同一區的那些段
+    for (var k = 1; k < idxs.length; k++) if (idxs[k] !== idxs[k - 1] + 1) { _dropN(o); return false; }   // 且連續
+    var start = idxs[0], byId = {};
+    for (var j = 0; j < o.length; j++) byId[o[j].id] = o[j];
+    for (var m = 0; m < segIds.length; m++) o[start + m] = byId[segIds[m]];   // 依新順序放回
+    _retileN(o, days); return true;
+  }
+  // 刪一家飯店（Vivian #2b）：晚數給同 region 鄰家（前優先）；單飯店區→只清成待訂（不刪段、避免日期破洞）。回傳是否成功。
+  function removeHotelSeg(base, segId, days) {
+    if (!Array.isArray(base) || !Array.isArray(days) || !base.length) return false;
+    var o = _orderedN(base, _baseIdx(days)), gps = _regionGroups(o);
+    var G = null, X = null, xi = -1;
+    for (var i = 0; i < gps.length && !G; i++) for (var j = 0; j < gps[i].segs.length; j++) if (gps[i].segs[j].id === segId) { G = gps[i]; X = gps[i].segs[j]; xi = j; break; }
+    if (!G) { _dropN(o); return false; }
+    if (G.segs.length < 2) { X.hotelPlaceId = null; _dropN(o); return true; }   // 單飯店區→待訂（不刪段）
+    var sib = G.segs[xi - 1] || G.segs[xi + 1]; sib._n += X._n;   // 同區鄰家吸收這幾晚
+    o.splice(o.indexOf(X), 1); var bk = base.indexOf(X); if (bk >= 0) base.splice(bk, 1);
+    _retileN(o, days); return true;
+  }
+  // 加飯店（Vivian #3 修）：從「整區」擠一晚出來給新飯店（待訂），而非只拆最後一家。只要區總晚 > 現有飯店數就行（現有飯店 cascade 壓 1 晚）。回傳新段 id 或 null（每晚都不同飯店→沒得分）。
+  function addHotelToRegion(base, segId, days, newId) {
+    if (!Array.isArray(base) || !Array.isArray(days) || !base.length) return null;
+    var o = _orderedN(base, _baseIdx(days)), gps = _regionGroups(o), G = null;
+    for (var i = 0; i < gps.length && !G; i++) for (var j = 0; j < gps[i].segs.length; j++) if (gps[i].segs[j].id === segId) { G = gps[i]; break; }
+    if (!G) { _dropN(o); return null; }
+    var T = _sumN(G.segs);
+    if (T <= G.segs.length) { _dropN(o); return null; }   // 每家都已 1 晚→沒有多餘晚數可分
+    _redistN(G.segs, T - 1);   // 現有飯店壓 1 晚（從最後能讓的那家 cascade）
+    var last = G.segs[G.segs.length - 1], pos = o.indexOf(last);
+    var ns = { id: newId, region: G.region, fromDay: days[0].id, toDay: days[0].id, hotelPlaceId: null, _n: 1 };
+    o.splice(pos + 1, 0, ns); base.push(ns);
+    _retileN(o, days); return newId;
   }
 
   function mergeObjField(base, mine, theirs) {
@@ -957,7 +1105,7 @@
     return out;
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, occSpotlightIds: occSpotlightIds, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, setRegionNights: setRegionNights, setHotelNights: setHotelNights, splitSegTail: splitSegTail, refitBaseToRange: refitBaseToRange, mergeBaseSegs: mergeBaseSegs, reorderRegionHotels: reorderRegionHotels, removeHotelSeg: removeHotelSeg, addHotelToRegion: addHotelToRegion, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, applyWashokuPalette: applyWashokuPalette, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, occSpotlightIds: occSpotlightIds, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;

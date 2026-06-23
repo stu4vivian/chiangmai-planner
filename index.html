@@ -7,19 +7,23 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐘</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="core.js?v=29"></script>
-<script src="sync.js?v=22"></script>
-<link rel="stylesheet" href="styles.css?v=52">
+<script src="core.js?v=30"></script>
+<script src="sync.js?v=23"></script>
+<link rel="stylesheet" href="styles.css?v=53">
 </head>
 <body>
 <header>
   <button id="verbtn" data-action="verbtn">🗂️</button>
   <nav class="tabs">
-    <button class="tabbtn active" data-action="tab" data-pg="flow">總覽</button>
-    <button class="tabbtn" data-action="tab" data-pg="lib">庫</button>
-    <button class="tabbtn" data-action="tab" data-pg="budget">💰</button>
+    <button class="tabbtn active" data-action="tab" data-pg="flow" aria-label="粗流">📅</button>
+    <span id="flowtools"></span>
+    <button class="tabbtn" data-action="tab" data-pg="lib" aria-label="卡片庫">📕</button>
+    <button class="tabbtn" data-action="tab" data-pg="budget" aria-label="預算">💰</button>
   </nav>
-  <span class="gear" data-action="settings">⚙</span>
+  <span id="hdrright">
+    <span id="hdrtools"></span>
+    <span class="gear" data-action="settings" aria-label="設定">⚙️<span class="gear-tx">設定</span></span>
+  </span>
 </header>
 
 <div id="mapdrawer" class="collapsed">
@@ -28,7 +32,7 @@
 </div>
 
 <main>
-  <section id="pg-flow"><div id="flowbar"></div><div class="ov-head"><span>整趟</span><span>早</span><span>午</span><span>晚</span></div><div id="ribbon"></div></section>
+  <section id="pg-flow"><div id="armbar" class="armbar" hidden></div><div class="ov-head"><span>整趟</span><span>早</span><span>午</span><span>晚</span></div><div id="ribbon"></div></section>
   <div id="splitbar"><span></span></div>
   <section id="pg-lib" hidden>
     <div id="libBody">
@@ -48,10 +52,10 @@
 <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="app-1-core.js?v=53"></script>
-<script src="app-2-browse.js?v=53"></script>
-<script src="app-3-panels.js?v=53"></script>
-<script src="app-4-edit.js?v=53"></script>
-<script src="app-5-budget-boot.js?v=53"></script>
+<script src="app-1-core.js?v=54"></script>
+<script src="app-2-browse.js?v=54"></script>
+<script src="app-3-panels.js?v=54"></script>
+<script src="app-4-edit.js?v=54"></script>
+<script src="app-5-budget-boot.js?v=54"></script>
 </body>
 </html>
