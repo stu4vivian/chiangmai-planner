@@ -31,10 +31,12 @@
   }
 
   function interactionBase(event) {
-    return {
+    var base = {
       versionId: requireText(event.versionId, 'versionId'),
       baseFingerprint: requireText(event.baseFingerprint, 'baseFingerprint')
     };
+    if (event.baseFingerprints) base.baseFingerprints = clone(event.baseFingerprints);
+    return base;
   }
 
   function openCreateAt(event) {
@@ -121,6 +123,7 @@
       occurrenceId: state.occurrenceId,
       versionId: state.versionId,
       baseFingerprint: transaction.baseFingerprint || state.baseFingerprint,
+      baseFingerprints: clone(transaction.baseFingerprints || state.baseFingerprints || null),
       transaction: transaction,
       previewRequest: clone(state.previewRequest || {}),
       issueDelta: delta,
@@ -164,7 +167,16 @@
       return { ok: false, code: 'FINEFLOW_STALE_VERSION', message: '版本已切換，請重新預演' };
     }
     var expectedFingerprint = state.transaction.baseFingerprint || state.baseFingerprint;
-    if (!context.currentFingerprint || context.currentFingerprint !== expectedFingerprint) {
+    var expectedFingerprints = state.transaction.baseFingerprints || state.baseFingerprints;
+    if (expectedFingerprints) {
+      var currentFingerprints = context.currentFingerprints || {};
+      var staleDay = Object.keys(expectedFingerprints).find(function (day) {
+        return !currentFingerprints[day] || currentFingerprints[day] !== expectedFingerprints[day];
+      });
+      if (staleDay) {
+        return { ok: false, code: 'FINEFLOW_STALE_BASE', day: staleDay, message: '行程內容已更新，請重新預演' };
+      }
+    } else if (!context.currentFingerprint || context.currentFingerprint !== expectedFingerprint) {
       return { ok: false, code: 'FINEFLOW_STALE_BASE', message: '行程內容已更新，請重新預演' };
     }
     var delta = issueDelta(state.transaction);
@@ -183,6 +195,7 @@
         command: 'apply-transaction',
         versionId: state.versionId,
         baseFingerprint: expectedFingerprint,
+        baseFingerprints: clone(expectedFingerprints || null),
         transaction: clone(state.transaction),
         createInverse: true
       }

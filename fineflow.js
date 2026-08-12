@@ -553,6 +553,142 @@
     return newTransaction('single', base, items, request, reasons);
   }
 
+  function dayIdFromIso(iso) {
+    return validIso(iso) ? iso.slice(5, 7) + iso.slice(8, 10) : null;
+  }
+
+  function crossDayIssues(beforeSchedules, afterSchedules, days, contextByDay, rules, fixedMutation) {
+    var issues = [];
+    days.forEach(function (day) {
+      var after = afterSchedules[day];
+      detectScheduleIssues(beforeSchedules[day], after, contextByDay[day] || {}).forEach(function (issue) {
+        var out = clone(issue);
+        out.id = day + '|' + issue.id;
+        out.day = day;
+        out.resolutions = suggestResolutions(out, after, rules || {});
+        issues.push(out);
+      });
+    });
+    if (fixedMutation && isFixed(fixedMutation.before)) {
+      var beforeInterval = occurrenceInterval(fixedMutation.before);
+      var afterInterval = occurrenceInterval(fixedMutation.after);
+      if (beforeInterval && afterInterval &&
+          (beforeInterval.startMs !== afterInterval.startMs || beforeInterval.endMs !== afterInterval.endMs)) {
+        var minutes = Math.max(Math.abs(afterInterval.startMs - beforeInterval.startMs), Math.abs(afterInterval.endMs - beforeInterval.endMs)) / MINUTE_MS;
+        var anchor = makeIssue('anchor_violation', [fixedMutation.occurrenceId], minutes, '固定標註行程被移動 ' + minutes + ' 分鐘', 'blocking', {
+          day: dayIdFromIso(fixedMutation.after.fine.startAt)
+        });
+        anchor.id = 'cross|' + anchor.id;
+        anchor.resolutions = suggestResolutions(anchor, afterSchedules[anchor.day], rules || {});
+        issues.push(anchor);
+      }
+    }
+    var priority = { worsened: 0, new: 1, preexisting: 2, resolved: 3 };
+    return issues.sort(function (a, b) {
+      return (priority[a.status] || 0) - (priority[b.status] || 0) || a.id.localeCompare(b.id);
+    });
+  }
+
+  function crossDayMutations(beforeSchedules, afterSchedules, days, reasons) {
+    var beforeById = {};
+    var afterById = {};
+    days.forEach(function (day) {
+      beforeSchedules[day].items.forEach(function (item) { beforeById[item.id] = item; });
+      afterSchedules[day].items.forEach(function (item) { afterById[item.id] = item; });
+    });
+    return Object.keys(afterById).sort().filter(function (id) {
+      return beforeById[id] && JSON.stringify(beforeById[id]) !== JSON.stringify(afterById[id]);
+    }).map(function (id) {
+      return { occurrenceId: id, before: clone(beforeById[id]), after: clone(afterById[id]), reason: reasons[id] || 'cross_day_change' };
+    });
+  }
+
+  function attachCrossDay(transaction) {
+    transaction.summary = summaryFor(transaction);
+    return transaction;
+  }
+
+  function previewCrossDayChange(version, request, trip) {
+    request = request || {};
+    trip = trip || {};
+    if (!version || !Array.isArray(version.plan)) throw new Error('Version plan is required');
+    var original = version.plan.find(function (item) { return item && item.id === request.occurrenceId; });
+    if (!original || !occurrenceInterval(original)) throw new Error('Unknown timed occurrence: ' + request.occurrenceId);
+    var sourceDay = request.sourceDay || scheduleDayId(original);
+    var targetDay = request.targetDay || dayIdFromIso(request.startAt || request.newStartAt);
+    if (!sourceDay || !targetDay) throw new Error('Cross-day change requires sourceDay and targetDay');
+    if (sourceDay === targetDay) {
+      return previewSingleChange(buildDaySchedule(version, sourceDay, trip), request);
+    }
+    if (scheduleDayId(original) !== sourceDay) throw new Error('Occurrence is not in the requested source day');
+    var moved = changeTimes(original, request);
+    if (dayIdFromIso(moved.fine.startAt) !== targetDay) throw new Error('Changed startAt is not in the requested target day');
+
+    var days = [sourceDay, targetDay];
+    var beforeSchedules = {};
+    var afterSchedules = {};
+    var baseFingerprints = {};
+    var contextByDay = clone(request.contextByDay || {});
+    if (!contextByDay[sourceDay] && request.sourceContext) contextByDay[sourceDay] = clone(request.sourceContext);
+    if (!contextByDay[targetDay] && request.targetContext) contextByDay[targetDay] = clone(request.targetContext);
+    days.forEach(function (day) {
+      beforeSchedules[day] = asSchedule(buildDaySchedule(version, day, trip));
+      baseFingerprints[day] = baseFingerprint(beforeSchedules[day]);
+    });
+    afterSchedules[sourceDay] = scheduleWithItems(beforeSchedules[sourceDay], beforeSchedules[sourceDay].items.filter(function (item) {
+      return item.id !== original.id;
+    }));
+    afterSchedules[targetDay] = scheduleWithItems(beforeSchedules[targetDay], beforeSchedules[targetDay].items.concat([moved]));
+    var reasons = {};
+    reasons[original.id] = 'cross_day_change';
+    if (request.strategy === 'ripple' || request.mode === 'ripple') {
+      var movedIndex = afterSchedules[targetDay].items.findIndex(function (item) { return item.id === original.id; });
+      var followingItem = afterSchedules[targetDay].items[movedIndex + 1];
+      var movedInterval = occurrenceInterval(moved);
+      var followingInterval = occurrenceInterval(followingItem);
+      var overlapMinutes = followingInterval ? Math.max(0, Math.ceil((movedInterval.endMs - followingInterval.startMs) / MINUTE_MS)) : 0;
+      if (overlapMinutes > 0) {
+        var followingBlock = continuousMovableBlock(afterSchedules[targetDay], movedIndex + 1, {
+          maxGapMin: request.rules && request.rules.maxContinuousGapMin
+        });
+        var followingIds = {};
+        followingBlock.forEach(function (item) { followingIds[item.id] = true; });
+        afterSchedules[targetDay] = scheduleWithItems(afterSchedules[targetDay], afterSchedules[targetDay].items.map(function (item) {
+          if (!followingIds[item.id]) return item;
+          reasons[item.id] = 'cross_day_ripple_following';
+          return shifted(item, overlapMinutes);
+        }));
+      }
+    }
+    var mutations = crossDayMutations(beforeSchedules, afterSchedules, days, reasons);
+    var fixedMutation = mutations.find(function (mutation) { return mutation.occurrenceId === original.id; });
+    var transaction = {
+      id: request.transactionId || 'ff_cross_day_' + baseFingerprints[sourceDay] + '_' + baseFingerprints[targetDay],
+      operation: 'cross_day',
+      occurrenceId: original.id,
+      versionId: request.versionId || null,
+      day: sourceDay,
+      days: days,
+      sourceDay: sourceDay,
+      targetDay: targetDay,
+      baseFingerprint: baseFingerprints[sourceDay],
+      baseFingerprints: baseFingerprints,
+      mutations: mutations,
+      issues: crossDayIssues(beforeSchedules, afterSchedules, days, contextByDay, request.rules || {}, fixedMutation),
+      selectedResolutions: {},
+      summary: null,
+      beforeSchedule: clone(beforeSchedules[sourceDay]),
+      afterSchedule: clone(afterSchedules[targetDay]),
+      beforeSchedules: clone(beforeSchedules),
+      afterSchedules: clone(afterSchedules),
+      context: clone(request.context || {}),
+      contextByDay: contextByDay,
+      rules: clone(request.rules || {}),
+      planOrderBefore: version.plan.map(function (item) { return item && item.id; })
+    };
+    return attachCrossDay(transaction);
+  }
+
   function previewRippleChange(schedule, request) {
     request = request || {};
     var base = asSchedule(schedule);
@@ -628,9 +764,82 @@
     return attachResolutions(out);
   }
 
+  function applyCrossDayResolution(transaction, resolution) {
+    var sourceIssue = transaction.issues.find(function (candidate) { return candidate.id === resolution.issueId; });
+    if (!sourceIssue) throw new Error('Resolution issue is missing: ' + resolution.issueId);
+    var out = clone(transaction);
+    out.selectedResolutions = out.selectedResolutions || {};
+    if (resolution.type === 'override_anchor' && sourceIssue.type === 'anchor_violation') {
+      out.selectedResolutions[sourceIssue.id] = clone(resolution);
+      out.issues.forEach(function (issue) { if (issue.id === sourceIssue.id) issue.accepted = true; });
+      return attachCrossDay(out);
+    }
+    if (resolution.type !== 'accept_conflict' && resolution.type !== 'keep_gap') {
+      var local = {
+        id: transaction.id + '_day_' + sourceIssue.day,
+        operation: transaction.operation,
+        versionId: transaction.versionId,
+        day: sourceIssue.day,
+        baseFingerprint: transaction.baseFingerprints[sourceIssue.day],
+        mutations: clone(transaction.mutations || []),
+        issues: [clone(sourceIssue)],
+        selectedResolutions: {},
+        beforeSchedule: clone(transaction.beforeSchedules[sourceIssue.day]),
+        afterSchedule: clone(transaction.afterSchedules[sourceIssue.day]),
+        context: clone((transaction.contextByDay || {})[sourceIssue.day] || {}),
+        rules: clone(transaction.rules || {})
+      };
+      var localResolved = applyResolution(local, resolution);
+      var resolvedSchedules = clone(transaction.afterSchedules);
+      resolvedSchedules[sourceIssue.day] = clone(localResolved.afterSchedule);
+      var resolvedReasons = mutationReasonMap(transaction.mutations);
+      (localResolved.mutations || []).forEach(function (mutation) {
+        resolvedReasons[mutation.occurrenceId] = mutation.reason;
+      });
+      out.afterSchedules = resolvedSchedules;
+      out.afterSchedule = clone(resolvedSchedules[out.targetDay]);
+      out.mutations = crossDayMutations(out.beforeSchedules, resolvedSchedules, out.days, resolvedReasons);
+      var resolvedMain = out.mutations.find(function (mutation) {
+        return mutation.occurrenceId === (transaction.occurrenceId || transaction.mutations[0].occurrenceId);
+      });
+      out.issues = crossDayIssues(out.beforeSchedules, resolvedSchedules, out.days, out.contextByDay || {}, out.rules || {}, resolvedMain);
+      out.selectedResolutions[sourceIssue.id] = clone(resolution);
+      return attachCrossDay(out);
+    }
+    var day = sourceIssue.day;
+    var afterSchedules = clone(transaction.afterSchedules);
+    var items = afterSchedules[day].items;
+    var targetId = sourceIssue.occurrenceIds[1];
+    var target = items.find(function (item) { return item.id === targetId; });
+    if (!target || !target.fine) throw new Error('Accepted issue target is missing');
+    if (resolution.type === 'keep_gap') {
+      target.fine.intentionalGapBefore = true;
+    } else {
+      var previousId = sourceIssue.occurrenceIds[0];
+      var acceptedWith = Array.isArray(target.fine.acceptedConflictWith) ? target.fine.acceptedConflictWith.slice() : [];
+      if (acceptedWith.indexOf(previousId) < 0) acceptedWith.push(previousId);
+      target.fine.acceptedConflictWith = acceptedWith;
+    }
+    afterSchedules[day] = scheduleWithItems(afterSchedules[day], items);
+    var reasons = mutationReasonMap(transaction.mutations);
+    reasons[targetId] = resolution.type;
+    out.afterSchedules = afterSchedules;
+    out.afterSchedule = clone(afterSchedules[out.targetDay]);
+    out.mutations = crossDayMutations(out.beforeSchedules, afterSchedules, out.days, reasons);
+    var mainMutation = out.mutations.find(function (mutation) {
+      return mutation.occurrenceId === (transaction.occurrenceId || transaction.mutations[0].occurrenceId);
+    });
+    out.issues = crossDayIssues(out.beforeSchedules, afterSchedules, out.days, out.contextByDay || {}, out.rules || {}, mainMutation);
+    out.selectedResolutions[sourceIssue.id] = clone(resolution);
+    return attachCrossDay(out);
+  }
+
   function applyResolution(transaction, resolutionId) {
     var resolution = typeof resolutionId === 'object' ? resolutionId : resolutionById(transaction, resolutionId);
     if (!resolution) throw new Error('Unknown resolution: ' + resolutionId);
+    if (transaction && Array.isArray(transaction.days) && transaction.beforeSchedules && transaction.afterSchedules) {
+      return applyCrossDayResolution(transaction, resolution);
+    }
     var out = clone(transaction);
     out.selectedResolutions = out.selectedResolutions || {};
     var items = clone(transaction.afterSchedule.items);
@@ -706,17 +915,81 @@
     return rebuildAfterResolution(transaction, items, reasons, resolution);
   }
 
-  function applyTransaction(version, transaction) {
-    if (!version || !Array.isArray(version.plan)) throw new Error('Version plan is required');
+  function unresolvedBlockingIssues(transaction) {
+    return (transaction.issues || []).filter(function (issue) {
+      var requiresChoice = issue.severity === 'blocking' || issue.type === 'conflict';
+      return requiresChoice && (issue.status === 'new' || issue.status === 'worsened') && !issue.accepted;
+    });
+  }
+
+  function reorderVersionDay(out, day) {
+    var dayIndexes = [];
+    var dayItems = [];
+    out.plan.forEach(function (item, index) {
+      if (scheduleDayId(item) === day) {
+        dayIndexes.push(index);
+        dayItems.push(item);
+      }
+    });
+    var timed = sortFineOccurrences(dayItems.filter(function (item) { return occurrenceInterval(item); }));
+    var untimed = dayItems.filter(function (item) { return !occurrenceInterval(item); });
+    timed.concat(untimed).forEach(function (item, index) { out.plan[dayIndexes[index]] = item; });
+  }
+
+  function restorePlanOrder(plan, order) {
+    if (!Array.isArray(order) || !order.length) return plan;
+    var positions = {};
+    order.forEach(function (id, index) { if (!Object.prototype.hasOwnProperty.call(positions, id)) positions[id] = index; });
+    return plan.map(function (item, index) { return { item: item, index: index }; }).sort(function (a, b) {
+      var ai = Object.prototype.hasOwnProperty.call(positions, a.item && a.item.id) ? positions[a.item.id] : order.length + a.index;
+      var bi = Object.prototype.hasOwnProperty.call(positions, b.item && b.item.id) ? positions[b.item.id] : order.length + b.index;
+      return ai - bi;
+    }).map(function (entry) { return entry.item; });
+  }
+
+  function applyCrossDayTransaction(version, transaction) {
     if (transaction.versionId && version.id !== transaction.versionId) {
       var wrongVersion = new Error('Fineflow preview belongs to a different version');
       wrongVersion.code = 'FINEFLOW_STALE_BASE';
       throw wrongVersion;
     }
-    var blocking = (transaction.issues || []).filter(function (issue) {
-      var requiresChoice = issue.severity === 'blocking' || issue.type === 'conflict';
-      return requiresChoice && (issue.status === 'new' || issue.status === 'worsened') && !issue.accepted;
+    transaction.days.forEach(function (day) {
+      var before = transaction.beforeSchedules[day];
+      var current = buildDaySchedule(version, day, { timeZone: before && before.timeZone || 'Asia/Bangkok' });
+      if (baseFingerprint(current) !== transaction.baseFingerprints[day]) {
+        var stale = new Error('Fineflow preview is stale on day ' + day + '; recalculate before applying');
+        stale.code = 'FINEFLOW_STALE_BASE';
+        stale.day = day;
+        throw stale;
+      }
     });
+    var blocking = unresolvedBlockingIssues(transaction);
+    if (blocking.length && transaction.operation !== 'undo' && !(transaction.context && transaction.context.allowBlockingIssues)) {
+      var unresolved = new Error('Fineflow transaction still has unresolved blocking issues');
+      unresolved.code = 'FINEFLOW_UNRESOLVED_BLOCKING';
+      unresolved.issues = clone(blocking);
+      throw unresolved;
+    }
+    var afterById = {};
+    transaction.mutations.forEach(function (mutation) { afterById[mutation.occurrenceId] = clone(mutation.after); });
+    var out = clone(version);
+    out.plan = out.plan.map(function (item) { return afterById[item.id] || item; });
+    transaction.days.forEach(function (day) { reorderVersionDay(out, day); });
+    if (transaction.restorePlanOrder) out.plan = restorePlanOrder(out.plan, transaction.restorePlanOrder);
+    return out;
+  }
+
+  function applyTransaction(version, transaction) {
+    if (!version || !Array.isArray(version.plan)) throw new Error('Version plan is required');
+    if (transaction && Array.isArray(transaction.days) && transaction.beforeSchedules && transaction.baseFingerprints) {
+      return applyCrossDayTransaction(version, transaction);
+    }
+    if (transaction.versionId && version.id !== transaction.versionId) {
+      var wrongVersion = new Error('Fineflow preview belongs to a different version');
+      wrongVersion.code = 'FINEFLOW_STALE_BASE';
+      throw wrongVersion;
+    }
+    var blocking = unresolvedBlockingIssues(transaction);
     if (blocking.length && transaction.operation !== 'undo' && !(transaction.context && transaction.context.allowBlockingIssues)) {
       var unresolved = new Error('Fineflow transaction still has unresolved blocking issues');
       unresolved.code = 'FINEFLOW_UNRESOLVED_BLOCKING';
@@ -748,6 +1021,47 @@
   }
 
   function invertTransaction(transaction, appliedVersion) {
+    if (transaction && Array.isArray(transaction.days) && transaction.beforeSchedules && transaction.afterSchedules) {
+      var currentSchedules = {};
+      var fingerprints = {};
+      transaction.days.forEach(function (day) {
+        var current = buildDaySchedule(appliedVersion, day, { timeZone: transaction.afterSchedules[day] && transaction.afterSchedules[day].timeZone || 'Asia/Bangkok' });
+        currentSchedules[day] = current;
+        fingerprints[day] = baseFingerprint(current);
+      });
+      var inverseMutations = transaction.mutations.map(function (mutation) {
+        return { occurrenceId: mutation.occurrenceId, before: clone(mutation.after), after: clone(mutation.before), reason: 'undo_' + mutation.reason };
+      });
+      var inverseMain = inverseMutations.find(function (mutation) {
+        return mutation.occurrenceId === transaction.mutations[0].occurrenceId;
+      });
+      var inverse = {
+        id: transaction.id + '_undo',
+        operation: 'undo',
+        occurrenceId: transaction.occurrenceId || transaction.mutations[0].occurrenceId,
+        versionId: transaction.versionId,
+        day: transaction.targetDay,
+        days: clone(transaction.days),
+        sourceDay: transaction.targetDay,
+        targetDay: transaction.sourceDay,
+        baseFingerprint: fingerprints[transaction.targetDay],
+        baseFingerprints: fingerprints,
+        mutations: inverseMutations,
+        issues: crossDayIssues(currentSchedules, transaction.beforeSchedules, transaction.days, transaction.contextByDay || {}, transaction.rules || {}, inverseMain),
+        selectedResolutions: {},
+        summary: null,
+        beforeSchedule: clone(currentSchedules[transaction.targetDay]),
+        afterSchedule: clone(transaction.beforeSchedules[transaction.sourceDay]),
+        beforeSchedules: clone(currentSchedules),
+        afterSchedules: clone(transaction.beforeSchedules),
+        context: clone(transaction.context || {}),
+        contextByDay: clone(transaction.contextByDay || {}),
+        rules: clone(transaction.rules || {}),
+        planOrderBefore: appliedVersion.plan.map(function (item) { return item && item.id; }),
+        restorePlanOrder: clone(transaction.planOrderBefore || null)
+      };
+      return attachCrossDay(inverse);
+    }
     var current = buildDaySchedule(appliedVersion, transaction.day, { timeZone: transaction.afterSchedule && transaction.afterSchedule.timeZone || 'Asia/Bangkok' });
     var inverse = {
       id: transaction.id + '_undo',
@@ -776,6 +1090,7 @@
     sortFineOccurrences: sortFineOccurrences,
     buildDaySchedule: buildDaySchedule,
     previewSingleChange: previewSingleChange,
+    previewCrossDayChange: previewCrossDayChange,
     previewRippleChange: previewRippleChange,
     previewSwap: previewSwap,
     detectScheduleIssues: detectScheduleIssues,

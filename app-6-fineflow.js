@@ -14,7 +14,8 @@
     importPreview: null,
     editor: null,
     lastVersionId: null,
-    suppressCardClick: false
+    suppressCardClick: false,
+    suppressCalendarClick: false
   };
   var uiStore = window.CNXFineFlowCalendarState && typeof window.CNXFineFlowCalendarState.createStore === 'function' ?
     window.CNXFineFlowCalendarState.createStore() : null;
@@ -839,7 +840,16 @@
       }
       if (editor.pointerMode && uiStore && typeof api.baseFingerprint === 'function') {
         var activeItem = findOccurrence(editor.id);
-        var confirmation = uiStore.dispatch({ type: 'CONFIRM', activeVersionId: version.id, currentFingerprint: api.baseFingerprint(buildSchedule(version, fineDayId(activeItem))) });
+        var confirmEvent = { type: 'CONFIRM', activeVersionId: version.id };
+        if (Array.isArray(transaction.days) && transaction.baseFingerprints) {
+          confirmEvent.currentFingerprints = {};
+          transaction.days.forEach(function (day) {
+            confirmEvent.currentFingerprints[day] = api.baseFingerprint(buildSchedule(version, day));
+          });
+        } else {
+          confirmEvent.currentFingerprint = api.baseFingerprint(buildSchedule(version, fineDayId(activeItem)));
+        }
+        var confirmation = uiStore.dispatch(confirmEvent);
         var applyCommand = confirmation.effects.some(function (effect) { return effect.command === 'apply-transaction'; });
         if (!applyCommand) {
           var failedEffect = confirmation.effects[0] || {};
@@ -1292,6 +1302,7 @@
       return;
     }
     if (action === 'ff-create-at') {
+      if (state.suppressCalendarClick) { state.suppressCalendarClick = false; return; }
       openSourceMenu({ day: target.dataset.day, date: target.dataset.date, start: target.dataset.time, end: addMinutesToTime(target.dataset.time, 60) });
       return;
     }
@@ -1332,7 +1343,24 @@
       return;
     }
     if (action === 'ff-conflict-single') { acceptPreviewConflicts(); return; }
-    if (action === 'ff-conflict-ripple' && state.editor) { if (uiStore) uiStore.dispatch({ type: 'CONFLICT_RIPPLE' }); state.editor.mode = 'ripple'; state.editor.transaction = null; runPreview(); return; }
+    if (action === 'ff-conflict-ripple' && state.editor) {
+      if (uiStore) uiStore.dispatch({ type: 'CONFLICT_RIPPLE' });
+      state.editor.mode = 'ripple';
+      if (state.editor.pointerDraft) {
+        try {
+          state.editor.transaction = previewPointerTransaction(state.editor.pointerDraft, findOccurrence(state.editor.id), 'ripple');
+          if (uiStore && state.editor.pointerMode) uiStore.dispatch({ type: 'PREVIEW_READY', transaction: state.editor.transaction });
+          renderEditor();
+        } catch (pointerError) {
+          state.editor.error = pointerError && pointerError.message || '無法計算連動後面行程';
+          renderEditor();
+        }
+      } else {
+        state.editor.transaction = null;
+        runPreview();
+      }
+      return;
+    }
     if (action === 'close' && sh && sh.querySelector('.ff-sheet')) {
       if (!sh.querySelector('.ff-detail-sheet')) state.selectedId = null;
       state.createDraft = null;
@@ -1394,6 +1422,7 @@
             resolved.manualFirstSchedule = true;
           }
           state.editor.transaction = resolved;
+          if (uiStore && state.editor.pointerMode) uiStore.dispatch({ type: 'PREVIEW_READY', transaction: resolved });
         }
         renderEditor();
       } catch (err) {
@@ -1406,85 +1435,401 @@
     if (action === 'ff-retry') { state.error = ''; renderFineFlow(); }
   });
 
-  function armPointerDraft(event, edge) {
-    var target = event.target.closest('[data-eid]');
-    var item = target && findOccurrence(target.dataset.eid);
-    if (!item || !item.fine) return;
+  // ── 三日曆直接操作：座標計算與交易引擎間只透過 adapter 交接。 ──
+  var POINTER_SNAP = 15;
+  var POINTER_PX_PER_HOUR = 64;
+
+  function clamp(value, minimum, maximum) { return Math.max(minimum, Math.min(maximum, value)); }
+  function minuteValue(time) { return +(time || '00:00').slice(0, 2) * 60 + +(time || '00:00').slice(3, 5); }
+  function snapPointerMinute(value) { return clamp(Math.round(value / POINTER_SNAP) * POINTER_SNAP, 0, 1440); }
+  function labelForMinute(value) {
+    value = clamp(Math.round(value), 0, 1440);
+    if (value === 1440) return '24:00';
+    return String(Math.floor(value / 60)).padStart(2, '0') + ':' + String(value % 60).padStart(2, '0');
+  }
+  function zonedAtMinute(dateText, minute) {
+    return minute >= 1440 ? zonedIso(addDays(dateText, 1), '00:00') : zonedIso(dateText, labelForMinute(minute));
+  }
+  function minuteAtPointer(clientY, scrollTop, scrollRectTop) {
+    return snapPointerMinute((clientY - scrollRectTop + scrollTop) * 60 / POINTER_PX_PER_HOUR);
+  }
+  function calendarColumnAt(clientX, left, width, count) {
+    count = count || 3;
+    if (!(width > 0) || clientX < left || clientX >= left + width) return -1;
+    return clamp(Math.floor((clientX - left) / (width / count)), 0, count - 1);
+  }
+  function pointerInterval(mode, anchorMinute, pointerMinute, originalStart, originalEnd, grabOffset, minimumDuration) {
+    minimumDuration = Math.max(POINTER_SNAP, +minimumDuration || POINTER_SNAP);
+    var start = originalStart, end = originalEnd;
+    if (mode === 'create') {
+      start = Math.min(anchorMinute, pointerMinute);
+      end = Math.max(anchorMinute, pointerMinute);
+      if (end === start) end = Math.min(1440, start + POINTER_SNAP);
+      if (end === start) start = Math.max(0, end - POINTER_SNAP);
+    } else if (mode === 'move') {
+      var duration = originalEnd - originalStart;
+      start = clamp(pointerMinute - grabOffset, 0, 1440 - duration);
+      end = start + duration;
+    } else if (mode === 'start') {
+      start = clamp(pointerMinute, 0, originalEnd - minimumDuration);
+    } else if (mode === 'end') {
+      end = clamp(pointerMinute, originalStart + minimumDuration, 1440);
+    }
+    return { start: start, end: end };
+  }
+
+  function scrollAndDays() {
+    var root = document.getElementById(rootId);
+    return { scroll: root && root.querySelector('.ff-cal-scroll'), days: root ? Array.prototype.slice.call(root.querySelectorAll('.ff-cal-day')) : [] };
+  }
+
+  function dayAtPointer(clientX, parts) {
+    var days = parts.days;
+    for (var i = 0; i < days.length; i++) {
+      var rect = days[i].getBoundingClientRect();
+      if (rect.width > 0 && clientX >= rect.left && clientX < rect.right) return days[i];
+    }
+    var holder = days[0] && days[0].parentElement;
+    var holderRect = holder && holder.getBoundingClientRect();
+    var index = holderRect ? calendarColumnAt(clientX, holderRect.left, holderRect.width, days.length) : -1;
+    return index >= 0 ? days[index] : null;
+  }
+
+  function pointerPosition(clientX, clientY) {
+    var parts = scrollAndDays();
+    if (!parts.scroll || !parts.days.length) return { valid: false };
+    var scrollRect = parts.scroll.getBoundingClientRect();
+    var day = dayAtPointer(clientX, parts);
+    var vertical = clientY >= scrollRect.top && clientY <= scrollRect.bottom;
+    return {
+      valid: !!day && vertical,
+      day: day,
+      date: day && day.dataset.date,
+      dayId: day && day.dataset.day,
+      minute: minuteAtPointer(clientY, parts.scroll.scrollTop, scrollRect.top),
+      scroll: parts.scroll,
+      scrollRect: scrollRect
+    };
+  }
+
+  function removePointerVisuals(draft) {
+    if (!draft) return;
+    clearTimeout(draft.timer);
+    if (draft.autoFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(draft.autoFrame);
+    if (draft.ghost && draft.ghost.parentNode) draft.ghost.parentNode.removeChild(draft.ghost);
+    if (draft.card) draft.card.classList.remove('is-pointer-origin');
+    document.body.classList.remove('ff-pointer-active');
+  }
+
+  function ensurePointerGhost(draft, day) {
+    if (!draft.ghost) {
+      draft.ghost = document.createElement('article');
+      draft.ghost.className = 'ff-cal-pointer-ghost';
+      draft.ghost.setAttribute('aria-live', 'polite');
+      draft.ghost.innerHTML = '<span class="ff-cal-pointer-time"></span><strong></strong>';
+    }
+    if (day && draft.ghost.parentNode !== day) day.appendChild(draft.ghost);
+    return draft.ghost;
+  }
+
+  function activatePointerDraft(draft) {
+    if (!draft || draft.active) return;
+    draft.active = true;
+    document.body.classList.add('ff-pointer-active');
+    if (draft.card) draft.card.classList.add('is-pointer-origin');
+    try { draft.captureTarget.setPointerCapture(draft.pointerId); } catch (_) {}
+    if (draft.pointerType === 'touch' && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try { navigator.vibrate(10); } catch (_) {}
+    }
+    updatePointerPreview(draft.lastX, draft.lastY);
+  }
+
+  function updatePointerPreview(clientX, clientY) {
+    var draft = pointerDraft;
+    if (!draft || !draft.active) return;
+    draft.lastX = clientX;
+    draft.lastY = clientY;
+    var position = pointerPosition(clientX, clientY);
+    var targetDay = position.day;
+    var validDate = draft.mode === 'move' || !targetDay || targetDay.dataset.date === draft.sourceDate;
+    var interval = pointerInterval(draft.mode, draft.anchorMinute, position.minute, draft.originalStart, draft.originalEnd, draft.grabOffset, draft.minimumDuration);
+    draft.preview = {
+      valid: position.valid && validDate,
+      date: targetDay && targetDay.dataset.date,
+      dayId: targetDay && targetDay.dataset.day,
+      start: interval.start,
+      end: interval.end
+    };
+    draft.didDrag = draft.didDrag || Math.abs(clientX - draft.startX) > 4 || Math.abs(clientY - draft.startY) > 4;
+    var ghost = ensurePointerGhost(draft, targetDay || draft.sourceDay);
+    ghost.classList.toggle('is-invalid', !draft.preview.valid);
+    ghost.style.top = interval.start * POINTER_PX_PER_HOUR / 60 + 'px';
+    ghost.style.height = Math.max(16, (interval.end - interval.start) * POINTER_PX_PER_HOUR / 60) + 'px';
+    ghost.querySelector('.ff-cal-pointer-time').textContent = labelForMinute(interval.start) + '–' + labelForMinute(interval.end);
+    ghost.querySelector('strong').textContent = (draft.preview.date || draft.sourceDate) + (draft.mode === 'create' ? '・新增行程' : '・' + occurrenceTitle(findOccurrence(draft.itemId)));
+    if (position.scroll) {
+      var edge = 52, speed = 0;
+      if (clientY < position.scrollRect.top + edge) speed = -Math.ceil((position.scrollRect.top + edge - clientY) / 4);
+      else if (clientY > position.scrollRect.bottom - edge) speed = Math.ceil((clientY - (position.scrollRect.bottom - edge)) / 4);
+      draft.autoSpeed = clamp(speed, -20, 20);
+      if (draft.autoSpeed && !draft.autoFrame && typeof requestAnimationFrame === 'function') {
+        draft.autoFrame = requestAnimationFrame(function autoScroll() {
+          if (!pointerDraft || pointerDraft !== draft || !draft.active || !draft.autoSpeed) { draft.autoFrame = null; return; }
+          position.scroll.scrollTop += draft.autoSpeed;
+          draft.autoFrame = requestAnimationFrame(autoScroll);
+          updatePointerPreview(draft.lastX, draft.lastY);
+        });
+      }
+    }
+  }
+
+  function armPointerDraft(event, mode, source) {
+    var item = source.item || null;
+    var position = pointerPosition(event.clientX, event.clientY);
+    if (!position.day || !position.scroll) return;
+    var start = item ? minuteValue(timeFromIso(item.fine.startAt)) : position.minute;
+    var end = item ? minuteValue(timeFromIso(item.fine.endAt)) : Math.min(1440, start + POINTER_SNAP);
     pointerDraft = {
       pointerId: event.pointerId,
-      itemId: item.id,
-      edge: edge || 'move',
+      pointerType: event.pointerType || 'mouse',
+      itemId: item && item.id,
+      mode: mode,
+      sourceDate: source.date || position.date,
+      sourceDayId: source.dayId || position.dayId,
+      sourceDay: position.day,
+      originalStart: start,
+      originalEnd: end,
+      anchorMinute: position.minute,
+      grabOffset: mode === 'move' ? position.minute - start : 0,
+      minimumDuration: item && item.fine ? Math.max(POINTER_SNAP, +item.fine.minDurationMin || POINTER_SNAP) : POINTER_SNAP,
+      startX: event.clientX,
       startY: event.clientY,
-      delta: 0,
-      active: event.pointerType !== 'touch',
-      card: target.closest('.ff-cal-card'),
-      timer: null
+      lastX: event.clientX,
+      lastY: event.clientY,
+      active: false,
+      didDrag: false,
+      card: source.card || null,
+      captureTarget: source.captureTarget || event.target,
+      timer: null,
+      ghost: null,
+      autoFrame: null,
+      autoSpeed: 0
     };
-    if (event.pointerType === 'touch') pointerDraft.timer = setTimeout(function () {
-      if (!pointerDraft || pointerDraft.pointerId !== event.pointerId) return;
-      pointerDraft.active = true;
-      if (pointerDraft.card) pointerDraft.card.classList.add('is-preview');
-    }, 450);
-    try { target.setPointerCapture(event.pointerId); } catch (_) {}
+    if (pointerDraft.pointerType === 'touch') {
+      pointerDraft.timer = setTimeout(function () {
+        if (pointerDraft && pointerDraft.pointerId === event.pointerId) activatePointerDraft(pointerDraft);
+      }, 450);
+    }
   }
 
   document.addEventListener('pointerdown', function (event) {
+    if (event.button != null && event.button !== 0) return;
     var resize = event.target.closest('[data-action="ff-resize-start"], [data-action="ff-resize-end"]');
-    if (resize) { event.preventDefault(); armPointerDraft(event, resize.dataset.action === 'ff-resize-start' ? 'start' : 'end'); return; }
-    var card = event.target.closest('.ff-cal-card-main[data-ff-drag="card"]');
-    if (card && !event.target.closest('button, a, input, select, textarea')) armPointerDraft(event, 'move');
+    if (resize) {
+      var resizeItem = findOccurrence(resize.dataset.eid);
+      if (resizeItem && resizeItem.fine) armPointerDraft(event, resize.dataset.action === 'ff-resize-start' ? 'start' : 'end', { item: resizeItem, card: resize.closest('.ff-cal-card'), captureTarget: resize, date: fineDate(resizeItem), dayId: fineDayId(resizeItem) });
+      return;
+    }
+    var cardMain = event.target.closest('.ff-cal-card-main[data-ff-drag="card"]');
+    if (cardMain && !event.target.closest('button, a, input, select, textarea')) {
+      var cardItem = findOccurrence(cardMain.dataset.eid);
+      if (cardItem && cardItem.fine) armPointerDraft(event, 'move', { item: cardItem, card: cardMain.closest('.ff-cal-card'), captureTarget: cardMain, date: fineDate(cardItem), dayId: fineDayId(cardItem) });
+      return;
+    }
+    var slot = event.target.closest('.ff-cal-slot[data-action="ff-create-at"]');
+    if (slot) armPointerDraft(event, 'create', { captureTarget: slot, date: slot.dataset.date, dayId: slot.dataset.day });
   });
 
   document.addEventListener('pointermove', function (event) {
-    if (!pointerDraft || pointerDraft.pointerId !== event.pointerId) return;
-    var raw = event.clientY - pointerDraft.startY;
-    if (!pointerDraft.active && event.pointerType === 'touch' && Math.abs(raw) > 8) {
-      clearTimeout(pointerDraft.timer);
+    var draft = pointerDraft;
+    if (!draft || draft.pointerId !== event.pointerId) return;
+    draft.lastX = event.clientX;
+    draft.lastY = event.clientY;
+    var distance = Math.max(Math.abs(event.clientX - draft.startX), Math.abs(event.clientY - draft.startY));
+    if (!draft.active && draft.pointerType === 'touch' && distance > 10) {
+      removePointerVisuals(draft);
       pointerDraft = null;
       return;
     }
-    if (!pointerDraft.active && event.pointerType !== 'touch' && Math.abs(raw) > 4) pointerDraft.active = true;
-    if (!pointerDraft.active) return;
+    if (!draft.active && draft.pointerType !== 'touch' && distance > 4) activatePointerDraft(draft);
+    if (!draft.active) return;
     event.preventDefault();
-    pointerDraft.delta = Math.round(raw / 16) * 15;
-    if (pointerDraft.card) {
-      pointerDraft.card.classList.add('is-preview');
-      pointerDraft.card.style.transform = 'translateY(' + (pointerDraft.delta * 64 / 60) + 'px)';
-    }
+    updatePointerPreview(event.clientX, event.clientY);
   }, { passive: false });
+
+  function pointerRequest(draft, item) {
+    var preview = draft.preview;
+    var sourceContext = contextForDay(draft.sourceDayId);
+    var targetContext = contextForDay(preview.dayId);
+    var contextByDay = {};
+    contextByDay[draft.sourceDayId] = sourceContext;
+    contextByDay[preview.dayId] = targetContext;
+    return {
+      versionId: activeVersion() && activeVersion().id,
+      occurrenceId: item.id,
+      itemId: item.id,
+      sourceDay: draft.sourceDayId,
+      sourceDayId: draft.sourceDayId,
+      sourceDate: draft.sourceDate,
+      targetDay: preview.dayId,
+      targetDayId: preview.dayId,
+      targetDate: preview.date,
+      day: preview.dayId,
+      startAt: zonedAtMinute(preview.date, preview.start),
+      endAt: zonedAtMinute(preview.date, preview.end),
+      newStartAt: zonedAtMinute(preview.date, preview.start),
+      newEndAt: zonedAtMinute(preview.date, preview.end),
+      fixedMarker: !!item.fine.fixedMarker,
+      compressibility: item.fine.compressibility,
+      minDurationMin: Math.min(preview.end - preview.start, Math.max(0, +item.fine.minDurationMin || 0)),
+      context: targetContext,
+      sourceContext: sourceContext,
+      targetContext: targetContext,
+      contextByDay: contextByDay,
+      rules: { maxContinuousGapMin: 90 }
+    };
+  }
+
+  function previewPointerTransaction(draft, item, strategy) {
+    var api = ffApi();
+    var request = pointerRequest(draft, item);
+    request.mode = strategy || 'single';
+    request.strategy = strategy || 'single';
+    if (draft.sourceDate !== draft.preview.date) {
+      var crossPreview = api.previewCrossDayChange || api.previewCrossDayMove || api.previewCalendarChange;
+      if (typeof crossPreview !== 'function') {
+        var missing = new Error('跨日排程模組尚未就緒，本次拖移沒有寫入');
+        missing.code = 'FINEFLOW_CROSS_DAY_UNAVAILABLE';
+        throw missing;
+      }
+      return crossPreview.call(api, activeVersion(), request, typeof TRIP !== 'undefined' ? TRIP : {});
+    }
+    var schedule = scheduleFor(draft.sourceDayId);
+    if (strategy === 'ripple' && typeof api.previewRippleChange === 'function') return api.previewRippleChange(schedule, request);
+    if (typeof api.previewSingleChange === 'function') return api.previewSingleChange(schedule, request);
+    return fallbackPreview(item, request, strategy || 'single', schedule);
+  }
+
+  function pointerNeedsDecision(transaction) {
+    return transactionIssues(transaction).some(function (issue) {
+      if (issue.accepted || (issue.status !== 'new' && issue.status !== 'worsened')) return false;
+      return issue.type === 'conflict' || issue.severity === 'blocking';
+    });
+  }
+
+  function applyPointerTransaction(item, transaction) {
+    var version = activeVersion();
+    if (!version || !transaction) return;
+    var before = copy(version), api = ffApi();
+    try {
+      var applyCross = api.applyCrossDayTransaction;
+      var result = transaction.crossDay && typeof applyCross === 'function' ? applyCross(version, transaction) :
+        (typeof api.applyTransaction === 'function' ? api.applyTransaction(version, transaction) : null);
+      var next = result && result.version ? result.version : result;
+      if (!next || !Array.isArray(next.plan)) {
+        next = copy(version);
+        (transaction.mutations || []).forEach(function (mutation) {
+          var index = next.plan.findIndex(function (entry) { return entry.id === mutation.occurrenceId; });
+          if (index >= 0 && mutation.after) next.plan[index] = copy(mutation.after);
+        });
+      }
+      // 重要：pointer 只套用 fine transaction，不改 day/slot 粗流欄位。
+      replaceVersionInPlace(version, next);
+      if (typeof syncActive === 'function') syncActive();
+      if (typeof afterChange === 'function') afterChange();
+      var message = '已' + summaryText(transaction);
+      if (typeof toast === 'function') toast(message, { undo: function () {
+        var current = activeVersion();
+        if (!current || current.id !== before.id) { toast('請先切回原版本再復原'); return; }
+        replaceVersionInPlace(current, before);
+        if (typeof syncActive === 'function') syncActive();
+        if (typeof afterChange === 'function') afterChange();
+      }});
+    } catch (error) {
+      if (typeof toast === 'function') toast(error && error.code === 'FINEFLOW_STALE_BASE' ? '行程剛被更新，請重新拖移' : '時間調整失敗，正式行程沒有變更');
+    }
+  }
+
+  function openPointerDecision(draft, item, transaction) {
+    openEditor(item.id);
+    if (!state.editor) return;
+    state.editor.start = labelForMinute(draft.preview.start);
+    state.editor.end = labelForMinute(draft.preview.end);
+    state.editor.durationMin = draft.preview.end - draft.preview.start;
+    state.editor.transaction = transaction;
+    state.editor.pointerRequest = pointerRequest(draft, item);
+    state.editor.pointerDraft = {
+      sourceDate: draft.sourceDate,
+      sourceDayId: draft.sourceDayId,
+      preview: copy(draft.preview)
+    };
+    state.editor.pointerMode = draft.mode === 'start' || draft.mode === 'end' ? 'resize' : 'drag';
+    state.editor.pointerEdge = draft.mode;
+    state.editor.notice = draft.preview.date !== draft.sourceDate ? '目標日期：' + draft.preview.date + '；粗流位置不會跟著移動。' : '';
+    if (uiStore) {
+      var previewEvent = {
+        occurrenceId: item.id,
+        versionId: state.editor.versionId,
+        baseFingerprint: transaction.baseFingerprint,
+        baseFingerprints: transaction.baseFingerprints,
+        previewRequest: state.editor.pointerRequest,
+        transaction: transaction
+      };
+      uiStore.dispatch(Object.assign({
+        type: state.editor.pointerMode === 'resize' ? 'START_RESIZE_PREVIEW' : 'START_DRAG_PREVIEW',
+        edge: state.editor.pointerEdge
+      }, previewEvent));
+      uiStore.dispatch({ type: 'PREVIEW_READY', transaction: transaction });
+    }
+    renderEditor();
+  }
 
   function finishPointerDraft(event, cancelled) {
     if (!pointerDraft || pointerDraft.pointerId !== event.pointerId) return;
     var draft = pointerDraft;
     pointerDraft = null;
-    clearTimeout(draft.timer);
-    if (draft.card) { draft.card.classList.remove('is-preview'); draft.card.style.transform = ''; }
-    if (cancelled || !draft.active || !draft.delta) return;
-    var item = findOccurrence(draft.itemId);
-    if (!item || !item.fine) return;
-    var startMinutes = +timeFromIso(item.fine.startAt).slice(0, 2) * 60 + +timeFromIso(item.fine.startAt).slice(3);
-    var endMinutes = +timeFromIso(item.fine.endAt).slice(0, 2) * 60 + +timeFromIso(item.fine.endAt).slice(3);
-    if (draft.edge === 'move' || draft.edge === 'start') startMinutes += draft.delta;
-    if (draft.edge === 'move' || draft.edge === 'end') endMinutes += draft.delta;
-    if (startMinutes < 0 || endMinutes > 1440 || endMinutes <= startMinutes) {
-      if (typeof toast === 'function') toast('第一版不支援跨日拖移，請調整回同一天');
+    var preview = draft.preview;
+    removePointerVisuals(draft);
+    if (draft.didDrag) {
+      if (draft.mode === 'create') state.suppressCalendarClick = true;
+      else state.suppressCardClick = true;
+      setTimeout(function () { state.suppressCalendarClick = false; state.suppressCardClick = false; }, 500);
+    }
+    if (cancelled || !draft.active || !draft.didDrag || !preview || !preview.valid) return;
+    if (draft.mode === 'create') {
+      openSourceMenu({ day: preview.dayId, date: preview.date, start: labelForMinute(preview.start), end: labelForMinute(preview.end) });
       return;
     }
-    state.suppressCardClick = true;
-    setTimeout(function () { state.suppressCardClick = false; }, 400);
-    openEditor(item.id);
-    state.editor.pointerMode = draft.edge === 'move' ? 'drag' : 'resize';
-    state.editor.pointerEdge = draft.edge;
-    state.editor.start = String(Math.floor(startMinutes / 60)).padStart(2, '0') + ':' + String(startMinutes % 60).padStart(2, '0');
-    state.editor.end = String(Math.floor(endMinutes / 60)).padStart(2, '0') + ':' + String(endMinutes % 60).padStart(2, '0');
-    state.editor.durationMin = endMinutes - startMinutes;
-    runPreview();
+    var item = findOccurrence(draft.itemId);
+    if (!item || !item.fine) return;
+    if (draft.sourceDate === preview.date && draft.originalStart === preview.start && draft.originalEnd === preview.end) return;
+    try {
+      var transaction = previewPointerTransaction(draft, item, 'single');
+      if (pointerNeedsDecision(transaction)) openPointerDecision(draft, item, transaction);
+      else applyPointerTransaction(item, transaction);
+    } catch (error) {
+      if (typeof toast === 'function') toast(error && error.message || '無法建立這次時間調整');
+    }
   }
 
   document.addEventListener('pointerup', function (event) { finishPointerDraft(event, false); });
   document.addEventListener('pointercancel', function (event) { finishPointerDraft(event, true); });
+  document.addEventListener('lostpointercapture', function (event) { finishPointerDraft(event, true); });
+  document.addEventListener('touchmove', function (event) {
+    if (!pointerDraft || !pointerDraft.active) return;
+    event.preventDefault();
+    var touch = event.touches && event.touches[0];
+    if (touch) updatePointerPreview(touch.clientX, touch.clientY);
+  }, { passive: false });
 
   document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && pointerDraft) {
+      var activePointer = pointerDraft;
+      pointerDraft = null;
+      removePointerVisuals(activePointer);
+      if (uiStore) uiStore.dispatch({ type: 'ESCAPE' });
+      return;
+    }
     var card = event.target.closest && event.target.closest('.ff-cal-card-main[role="button"]');
     if (card && event.target === card && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
@@ -1574,6 +1919,13 @@
     openDetail: openOccurrenceDetail,
     openAddSource: function () { openSourceMenu({}); },
     openImport: openImportPreview,
+    pointerMath: {
+      snapMinute: snapPointerMinute,
+      minuteAtPointer: minuteAtPointer,
+      columnAt: calendarColumnAt,
+      interval: pointerInterval,
+      labelForMinute: labelForMinute
+    },
     resetTransient: function () {
       state.createDraft = null;
       state.selectedId = null;
