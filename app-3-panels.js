@@ -86,6 +86,10 @@ function renderPicker(day,slot,mode){
 
 const ov=document.getElementById('overlay'),sh=document.getElementById('sheet');
 let navStack=[], curReopen=null, curKey=null;   // 返回堆疊＋自動巢狀：每個「父層」sheet 開窗時登記 curReopen(怎麼重開自己)+curKey；開不同子窗→openSheet 自動 push 父層→closeSheet pop 回去。統一取代散落旗標，且新浮層不會再漏（巢狀自動記住，非逐點手接）
+function resetOverlayNavigation(){
+  navStack.length=0; curReopen=null; curKey=null;
+  if(window.CNXFineFlowUI&&typeof window.CNXFineFlowUI.resetTransient==='function') window.CNXFineFlowUI.resetTransient();
+}
 function openSheet(html, reopen, key){
   if(document.body.classList.contains('sheet-open') && curReopen && key!==curKey) navStack.push(curReopen);   // 在父層上開「不同的」子窗→自動記住回父層（同 key＝原地重繪不記；父層自己登記 curReopen，任何子窗都涵蓋、不漏）
   sh.classList.remove('sheet-edit','sheet-picker','pk2','tall','sheet-cfg'); document.body.classList.remove('cardpeek','peek-edit'); ['pkDay','pkSlot','pkMode','omPid','omMove','omDay','omSlot','opEid','dsPid','dsMove','wkKind','wkKey','emCat'].forEach(k=>delete sh.dataset[k]); sh.innerHTML='<button class="sheetclose" data-action="close" aria-label="關閉">✕</button>'+html; ov.classList.add('on'); document.body.classList.add('sheet-open');
@@ -107,7 +111,7 @@ function closeSheet(){
 //  原本面板的「🎯 離它最近的空格」距離推薦改複用 recommendSlots 至 armedReco，亮格時標 🎯。）
 function openOccupiedMenu(day, slot, newPid, moveEid){
   const ents=plan.filter(e=>e.day===day&&e.slot===slot&&e.id!==moveEid); if(!ents.length) return;
-  const first=getPlace(ents[0].placeId), nm=esc(first?first.name:'');
+  const first=getPlace(ents[0].placeId), nm=esc(first?first.name:((ents[0].custom&&ents[0].custom.title)||'自訂行程'));
   const d=DAYS.find(x=>x.id===day)||{label:day};
   openSheet(`<h3>${esc(d.label||day)} ${esc(slotObj(slot).label)}已有「${nm}」</h3>
    <div class="opt" data-action="om-both"><div>➕ 也排這格（都去）<small>兩家都去、都算進預算</small></div></div>
@@ -166,7 +170,7 @@ function openOccPanel(eid){
   sh.dataset.opEid=eid;
   autoSpot(CNXCore.occSpotlightIds(av(), eid, places));   // 占用面板→占用者＋備案＋2選1 一起亮
 }
-ov.addEventListener('click',e=>{ if(e.target!==ov) return; if(sh.dataset.wkKind||sh.dataset.emCat){ openConfig(); } else { closeSheet(); } });   // 選色／選圖示頁點背景＝回設定清單（與 ✕ 一致、不整個關，Vivian #4）
+ov.addEventListener('click',e=>{ if(e.target!==ov) return; if(sh.dataset.wkKind||sh.dataset.emCat){ openConfig(); } else { if(sh.querySelector('.ff-sheet')) resetOverlayNavigation(); closeSheet(); } });   // 選色／選圖示頁點背景＝回設定清單（與 ✕ 一致、不整個關，Vivian #4）
 // 全域 Escape：有 sheet/overlay（細看/挑選器/編輯卡/版本…）開著就關它。單一 document 級處理器
 function sheetOpen(){ return ov.classList.contains('on'); }
 document.addEventListener('keydown',e=>{

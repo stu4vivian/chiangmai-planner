@@ -5,6 +5,18 @@
 var armed=null;
 function armPlace(placeId){ if(!getPlace(placeId)) return; if(armed&&!armed.moveEid&&armed.placeId===placeId){ disarm(); return; } armed={placeId}; enterArm(); }   // 再點同一張卡＝取消（toggle，spec §7）
 function armMove(eid){ const e=plan.find(x=>x.id===eid); if(!e) return; armed={placeId:e.placeId, moveEid:eid}; enterArm(); }
+function moveOccurrenceToCoarseSlot(e,day,slot){
+  if(!e) return null;
+  const before={day:e.day,slot:e.slot,startTime:e.startTime,fine:e.fine?JSON.parse(JSON.stringify(e.fine)):null};
+  e.day=day; e.slot=slot;
+  if(e.fine){ e.fine=null; delete e.startTime; }
+  return before;
+}
+function restoreOccurrencePosition(e,before){
+  if(!e||!before) return;
+  e.day=before.day; e.slot=before.slot; e.fine=before.fine?JSON.parse(JSON.stringify(before.fine)):null;
+  if(before.startTime) e.startTime=before.startTime; else delete e.startTime;
+}
 function enterArm(){ closeSheet(); switchTab('flow'); renderArm(); renderRibbon(); }   // 進入待命：關浮層、跳總覽、亮格＋升起橫幅
 function disarm(){ armed=null; renderArm(); renderRibbon(); }                            // 離開待命：收橫幅、復原亮格
 function armedReco(){   // 待命中算「離它最近的一個空格」{day,slot,dist}，給亮格標 🎯（複用 recommendSlots，不重造面板那套）
@@ -29,8 +41,8 @@ function dropInto(day, slot){   // 待命中點亮起的真實格＝放入/移�
   const so=slotObj(slot), lbl=((DAYS.find(x=>x.id===day)||{}).label||day)+' '+(so.ctx||so.label);   // 行程格用 ctx（上午/晚）比 label（行程）清楚
   if(armed.moveEid){
     const eid=armed.moveEid, e=plan.find(x=>x.id===eid); if(!e){ disarm(); return; }
-    const pd=e.day, ps=e.slot; e.day=day; e.slot=slot; closeSheet(); disarm(); afterChange();   // closeSheet：關細排 sheet（手機點天展開那層）回總覽看結果
-    toast('已移到 '+lbl, {undo:()=>{ const x=plan.find(y=>y.id===eid); if(x){ x.day=pd; x.slot=ps; } afterChange(); }});
+    const before=moveOccurrenceToCoarseSlot(e,day,slot); closeSheet(); disarm(); afterChange();   // 粗流只表達時段；原有精確時間失效後回細流「尚未排時間」，避免同筆資料兩套時間互相矛盾
+    toast('已移到 '+lbl+(before.fine?'；請到細流補精確時間':''), {undo:()=>{ const x=plan.find(y=>y.id===eid); if(x) restoreOccurrencePosition(x,before); afterChange(); }});
   } else {
     const nid=uid(); plan.push({id:nid, placeId:armed.placeId, day, slot}); closeSheet(); disarm(); afterChange();
     toast('已排入 '+lbl, {undo:()=>{ const i=plan.findIndex(y=>y.id===nid); if(i>=0) plan.splice(i,1); afterChange(); }});
@@ -293,6 +305,13 @@ function renderLib(){
 }
 
 function slotMetaOf(day,slot){ return slotMetaArr.find(m=>m.day===day&&m.slot===slot); }
+function occurrenceView(e){
+  const p=e&&getPlace(e.placeId);
+  if(p) return {place:p,name:p.name,emoji:placeEmoji(p),action:'occpanel'};
+  const name=e&&e.custom&&e.custom.title;
+  if(name) return {place:null,name,emoji:esc(temoji(e.category||'其他')),action:'ff-card-detail'};
+  return null;
+}
 // ── 總覽・編輯時間軸（模式1，定稿＝v1-編輯時間軸_真資料.html）：直向一天一段、早午晚直堆、大日號＋區域左帽/小標＋rubric＋髮絲線。
 //    矩陣＝導航（spec §0）：整天可點 openday→展開細排；早午晚＝合併摘要、空段顯示淡＋（永不直接加，因一段含 2–3 真實格）。資料同源 CNXCore.overviewModel。──
 const PERIOD_KICK={'早':'MORNING','午':'NOON','晚':'NIGHT'};
@@ -301,9 +320,9 @@ function tlPeriodHTML(items,tentative,col){
     items=items.slice().sort((a,b)=>{ const d=CNXCore.slotOrderInPeriod(a.slot)-CNXCore.slotOrderInPeriod(b.slot); if(d) return d;   // 先照真實格（早餐→上午…），同一真實格內再照 seq（手動順序）
       const sa=seqOf(a.eid), sb=seqOf(b.eid); if(sa==null&&sb==null) return 0; if(sa==null) return 1; if(sb==null) return -1; return sa-sb; });
     let lis=items.map(it=>{
-      const p=getPlace(it.placeId), tn=(p&&p.tier)||0;
+      const view=occurrenceView(plan.find(e=>e.id===it.eid)), p=view&&view.place, tn=(p&&p.tier)||0;
       const warn=it.warn?`<span class="tlwarn" title="${esc(it.warn)}">⚠️</span>`:'';
-      return `<li data-eid="${esc(it.eid)}" data-slot="${esc(it.slot)}">${warn}<span class="e">${placeEmoji(p)}</span><span class="nm">${esc(it.name)}</span>${tn?`<span class="t" style="color:${col}">T${tn}</span>`:''}</li>`;   // data-eid/slot＝日卡項目可拖（切片 B・日卡跨天）
+      return `<li data-eid="${esc(it.eid)}" data-slot="${esc(it.slot)}"${view&&view.action==='ff-card-detail'?' data-action="ff-card-detail"':''}>${warn}<span class="e">${view?view.emoji:'📅'}</span><span class="nm">${esc(it.name)}</span>${tn?`<span class="t" style="color:${col}">T${tn}</span>`:''}</li>`;   // data-eid/slot＝日卡項目可拖（切片 B・日卡跨天）
     }).join('');
     if(tentative) lis+='<li class="tent">⏳ 待定</li>';   // 有項目又標待定→也提示（保留舊行為）
     return lis;
@@ -374,9 +393,9 @@ function ovtTable(days, reco){   // 版① 扁平髮絲線 CSS grid（定稿 A-�
       let inner;
       if(entries.length){
         const day=DAYS.find(x=>x.id===d.id), per=CNXCore.slotPeriod(s.key);
-        inner=entries.map(e=>{ const p=getPlace(e.placeId); if(!p) return '';
-          const warn=per?CNXCore.cellWarning(p,day,per):'';
-          return `<span class="it" data-action="occpanel" data-eid="${e.id}">${warn?`<span class="warn" title="${esc(warn)}">⚠️</span>`:''}<span class="e">${placeEmoji(p)}</span><span class="nm">${esc(p.name)}</span></span>`;
+        inner=entries.map(e=>{ const view=occurrenceView(e); if(!view) return '';
+          const warn=view.place&&per?CNXCore.cellWarning(view.place,day,per):'';
+          return `<span class="it" data-action="${view.action}" data-eid="${e.id}">${warn?`<span class="warn" title="${esc(warn)}">⚠️</span>`:''}<span class="e">${view.emoji}</span><span class="nm">${esc(view.name)}</span></span>`;
         }).join('');
       } else inner='<span class="cempty">＋</span>';
       let clc='ovg-cl';
@@ -426,9 +445,9 @@ function dayRowsHTML(dayId){   // 共用：某天細排各 slot 列（細看 she
     if(meta&&meta.tentative) cells+=`<div class="tentrow" data-action="cleartent" data-day="${dayId}" data-slot="${s.key}">⏳ 待定中（點一下取消）</div>`;
     if(entries.length){
       // 已填→緊湊：占用列堆左欄＋右側小「＋」加第二項（密度，Vivian 回饋）。精確鐘點＝切片6，此處不放編輯鈕；已設時間唯讀顯示。
-      const items=entries.map(e=>{ const p=getPlace(e.placeId); if(!p) return '';
+      const items=entries.map(e=>{ const view=occurrenceView(e); if(!view) return '';
         const tm=e.startTime?`<span class="dtime">🕑${esc(e.startTime)}</span>`:'';
-        return `<div class="ditem ${isMeal?'meal':''}" data-action="occpanel" data-eid="${e.id}">${placeEmoji(p)} <span class="nm">${esc(p.name)}</span>${tm}</div>`;
+        return `<div class="ditem ${isMeal?'meal':''}" data-action="${view.action}" data-eid="${e.id}">${view.emoji} <span class="nm">${esc(view.name)}</span>${tm}</div>`;
       }).join('');
       cells+=`<div class="fillrow${armed?' armdrop':''}" data-day="${dayId}" data-slot="${s.key}"><div class="fillitems">${items}</div><div class="dadd-mini" data-action="pickslot" data-day="${dayId}" data-slot="${s.key}" title="再加一項">＋</div></div>`;   // data-day/slot＝拖曳放到已填列也接得住（切片 B）
     } else {

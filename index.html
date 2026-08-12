@@ -7,9 +7,13 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐘</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="core.js?v=30"></script>
+<script src="core.js?v=31"></script>
+<script src="fineflow.js?v=1"></script>
+<script src="fineflow-calendar.js?v=1"></script>
+<script src="fineflow-calendar-state.js?v=1"></script>
+<script src="fineflow-import.js?v=1"></script>
 <script src="sync.js?v=23"></script>
-<link rel="stylesheet" href="styles.css?v=53">
+<link rel="stylesheet" href="styles.css?v=54">
 </head>
 <body>
 <header>
@@ -17,6 +21,7 @@
   <nav class="tabs">
     <button class="tabbtn active" data-action="tab" data-pg="flow" aria-label="粗流">📅</button>
     <span id="flowtools"></span>
+    <button class="tabbtn" data-action="tab" data-pg="fineflow" aria-label="細流">🕰️</button>
     <button class="tabbtn" data-action="tab" data-pg="lib" aria-label="卡片庫">📕</button>
     <button class="tabbtn" data-action="tab" data-pg="budget" aria-label="預算">💰</button>
   </nav>
@@ -34,6 +39,7 @@
 <main>
   <section id="pg-flow"><div id="armbar" class="armbar" hidden></div><div class="ov-head"><span>整趟</span><span>早</span><span>午</span><span>晚</span></div><div id="ribbon"></div></section>
   <div id="splitbar"><span></span></div>
+  <section id="pg-fineflow" hidden aria-label="細流智慧排程"></section>
   <section id="pg-lib" hidden>
     <div id="libBody">
       <div class="lib-search"><input id="libSearch" placeholder="🔍 搜店名／memo"><span class="add" data-action="lib-link">🔗 貼連結</span><span class="add" data-action="lib-new">＋新增</span><span class="add libcol" data-action="lib-collapse" title="收合庫">›</span></div>
@@ -56,6 +62,7 @@
 <script src="app-2-browse.js?v=54"></script>
 <script src="app-3-panels.js?v=54"></script>
 <script src="app-4-edit.js?v=54"></script>
-<script src="app-5-budget-boot.js?v=54"></script>
+<script src="app-6-fineflow.js?v=1"></script>
+<script src="app-5-budget-boot.js?v=55"></script>
 </body>
 </html>

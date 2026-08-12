@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
 
-  var SCHEMA_VERSION = 19;
+  var SCHEMA_VERSION = 21;
 
   // 安全淨化（堵同步/匯入設定欄 stored-XSS）：顏色只認 #hex，否則退預設；文字標籤剝 HTML 特殊字元。
   var COLOR_FALLBACK = '#9b9b9b';
@@ -94,6 +94,7 @@
   // 清邁預設 trip：colors 取自 HTML 舊 AREAS/STAY_CLASS
   var CM_TRIP_DEFAULT = {
     name: '清邁 2026', startDate: '2026-08-22', endDate: '2026-09-01', currency: 'NTD',
+    timeZone: 'Asia/Bangkok',
     zones: [
       { key:'old', label:'古城內', color:'#e8a13a', areaLabels:['古城','北/東北'] },
       { key:'nim', label:'尼曼',   color:'#6a8caf', areaLabels:['尼曼/西'] },
@@ -180,12 +181,21 @@
     });
     return out;
   }
+  function normalizeTimeZone(value) {
+    if (typeof value !== 'string' || !value.trim()) return CM_TRIP_DEFAULT.timeZone;
+    try {
+      return new Intl.DateTimeFormat('en-US', { timeZone: value.trim() }).resolvedOptions().timeZone;
+    } catch (err) {
+      return CM_TRIP_DEFAULT.timeZone;
+    }
+  }
   function normalizeTrip(t) {
     t = (t && typeof t === 'object') ? t : {};
     var d = CM_TRIP_DEFAULT;
     var trip = {
       name: t.name || d.name, startDate: t.startDate || d.startDate, endDate: t.endDate || d.endDate,
       currency: t.currency || d.currency,
+      timeZone: normalizeTimeZone(t.timeZone),
       mapCenter: (t.mapCenter && typeof t.mapCenter.lat === 'number') ? t.mapCenter : Object.assign({}, d.mapCenter),
       // 任何非空 priceBands（含舊 {mid,high,labels}）都轉發給 normPriceBands 轉 tiers；缺席/空 {} 才退種子預設（防舊自訂價位遺失）
       priceBands: normPriceBands((t.priceBands && typeof t.priceBands === 'object' && Object.keys(t.priceBands).length) ? t.priceBands : d.priceBandsV18),
@@ -318,14 +328,125 @@
     };
   }
 
+  var SCHEDULE_KINDS = { place:1, custom:1, connector_travel:1, booked_transport:1, flight:1, sleep:1 };
+  var COMPRESSIBILITY = { none:1, suggest:1, free:1 };
+  var TIME_COMMITMENTS = { flexible:1, preferred:1, external:1 };
+  var AUTO_MOVE_POLICIES = { auto:1, confirm:1, manual:1 };
+  var TRANSPORT_SOURCES = { manual:1, maps:1 };
+
+  function safeNonNegativeInt(value, fallback) {
+    return (typeof value === 'number' && isFinite(value) && value >= 0) ? Math.round(value) : fallback;
+  }
+  function isIsoDateTime(value) {
+    if (typeof value !== 'string') return false;
+    var m = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|([+-])(\d{2}):(\d{2}))$/);
+    if (!m) return false;
+    var year = +m[1], month = +m[2], day = +m[3], hour = +m[4], minute = +m[5], second = +(m[6] || 0);
+    if (hour > 23 || minute > 59 || second > 59 || +(m[8] || 0) > 23 || +(m[9] || 0) > 59) return false;
+    var calendar = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 && calendar.getUTCDate() === day &&
+      isFinite(Date.parse(value));
+  }
+  function normalizeCustom(value) {
+    if (!value || typeof value !== 'object') return null;
+    var title = safeStr(value.title).trim();
+    if (!title) return null;
+    return { title: title, kind: safeStr(value.kind).trim() || 'life' };
+  }
+  function normalizeFine(value) {
+    if (!value || typeof value !== 'object' || !isIsoDateTime(value.startAt) || !isIsoDateTime(value.endAt)) return null;
+    var intervalMin = Math.round((Date.parse(value.endAt) - Date.parse(value.startAt)) / 60000);
+    if (!(intervalMin > 0)) return null;
+    var original = safeNonNegativeInt(value.originalDurationMin, intervalMin);
+    if (!original) original = intervalMin;
+    var minimum = safeNonNegativeInt(value.minDurationMin, original);
+    if (minimum > original) minimum = original;
+    var acceptedConflictWith = [];
+    (Array.isArray(value.acceptedConflictWith) ? value.acceptedConflictWith : []).forEach(function (id) {
+      if (typeof id === 'string' && id && acceptedConflictWith.indexOf(id) < 0) acceptedConflictWith.push(id);
+    });
+    return {
+      startAt: value.startAt,
+      endAt: value.endAt,
+      originalDurationMin: original,
+      minDurationMin: minimum,
+      compressibility: COMPRESSIBILITY[value.compressibility] ? value.compressibility : 'none',
+      fixedMarker: value.fixedMarker === true,
+      intentionalGapBefore: value.intentionalGapBefore === true,
+      acceptedConflictWith: acceptedConflictWith,
+      timeCommitment: TIME_COMMITMENTS[value.timeCommitment] ? value.timeCommitment : 'flexible',
+      autoMovePolicy: AUTO_MOVE_POLICIES[value.autoMovePolicy] ? value.autoMovePolicy : 'manual',
+      manualOrder: safeNonNegativeInt(value.manualOrder, 0)
+    };
+  }
+  function normalizeTransport(value) {
+    if (!value || typeof value !== 'object') return null;
+    return {
+      fromOccurrenceId: (typeof value.fromOccurrenceId === 'string' && value.fromOccurrenceId) ? value.fromOccurrenceId : null,
+      toOccurrenceId: (typeof value.toOccurrenceId === 'string' && value.toOccurrenceId) ? value.toOccurrenceId : null,
+      mode: safeStr(value.mode).trim(),
+      minDurationMin: safeNonNegativeInt(value.minDurationMin, 0),
+      source: TRANSPORT_SOURCES[value.source] ? value.source : 'manual',
+      routeLabel: safeStr(value.routeLabel).trim()
+    };
+  }
+  function normalizeTodos(value) {
+    return (Array.isArray(value) ? value : []).map(function (todo) {
+      if (!todo || typeof todo.id !== 'string' || !todo.id) return null;
+      var text = safeStr(todo.text).trim();
+      if (!text) return null;
+      return { id: todo.id, text: text, done: todo.done === true };
+    }).filter(Boolean);
+  }
+  function normalizeMapLinks(value) {
+    var seen = {};
+    return (Array.isArray(value) ? value : []).map(function (link) {
+      if (typeof link === 'string') link = { url: link };
+      if (!link || typeof link !== 'object') return null;
+      var url = safeStr(link.url).trim();
+      if (!/^https?:\/\//i.test(url) || seen[url]) return null;
+      seen[url] = true;
+      return { label: safeStr(link.label).trim(), url: url, placeId: (typeof link.placeId === 'string' && link.placeId) ? link.placeId : null };
+    }).filter(Boolean);
+  }
+  function slotFromTime(time) {
+    var hour = Number(safeStr(time).slice(0, 2));
+    if (hour < 9) return 'breakfast';
+    if (hour < 12) return 'am';
+    if (hour < 14) return 'lunch';
+    if (hour < 16) return 'afternoon';
+    if (hour < 18) return 'evening';
+    if (hour < 20) return 'dinner';
+    return 'night';
+  }
+  function normalizeOccurrence(e) {
+    if (!e || typeof e !== 'object') return null;
+    var placeId = (typeof e.placeId === 'string' && e.placeId) ? e.placeId : null;
+    var custom = normalizeCustom(e.custom);
+    if (!placeId && !custom) return null;
+    var kind = SCHEDULE_KINDS[e.scheduleKind] ? e.scheduleKind : (placeId ? 'place' : 'custom');
+    var out = {
+      id: e.id,
+      placeId: placeId,
+      custom: custom,
+      day: e.day,
+      slot: e.slot,
+      fine: normalizeFine(e.fine),
+      scheduleKind: kind,
+      transport: normalizeTransport(e.transport),
+      todos: normalizeTodos(e.todos),
+      category: safeStr(e.category).trim(),
+      notes: safeStr(e.notes),
+      mapLinks: normalizeMapLinks(e.mapLinks),
+      seq: (typeof e.seq === 'number' && isFinite(e.seq)) ? e.seq : 0
+    };
+    if (typeof e.startTime === 'string' && e.startTime) out.startTime = e.startTime;
+    return out;
+  }
+
   function migrateVersion(v, zoneMap) {
     v = v || {};
-    var plan = (Array.isArray(v.plan) ? v.plan : []).map(function (e) {
-      if (!e || !e.placeId) return null;
-      var o = { id: e.id, placeId: e.placeId, day: e.day, slot: e.slot };
-      if (typeof e.startTime === 'string' && e.startTime) o.startTime = e.startTime;
-      return o;
-    }).filter(Boolean);
+    var plan = (Array.isArray(v.plan) ? v.plan : []).map(normalizeOccurrence).filter(Boolean);
     var base = (Array.isArray(v.base) ? v.base : []).map(function (s) {
       if (!s) return null;
       var region = s.region || (zoneMap && zoneMap[s.zone]) || s.zone || '';
@@ -382,14 +503,13 @@
       var migCount = 0;
       (Array.isArray(db.plan) ? db.plan : []).forEach(function (e) {
         if (!e) return;
-        if (e.placeId) {
-          var o = { id: e.id, placeId: e.placeId, day: e.day, slot: e.slot };
-          if (typeof e.startTime === 'string' && e.startTime) o.startTime = e.startTime;
-          legacyPlan.push(o);
+        if (e.placeId || e.custom) {
+          var normalized = normalizeOccurrence(e);
+          if (normalized) legacyPlan.push(normalized);
         } else if (e.label || e.placeholder) {
           var nid = 'mig_' + (migCount++);
           out.places.push({ id: nid, name: e.label || '待定', en: '', type: e.type || '其他', area: '其他', lat: null, lng: null, hours: '', price: '', note: '' });
-          legacyPlan.push({ id: e.id, placeId: nid, day: e.day, slot: e.slot });
+          legacyPlan.push(normalizeOccurrence({ id: e.id, placeId: nid, day: e.day, slot: e.slot, startTime: e.startTime, seq: e.seq }));
         }
       });
       out.versions = [ { id: 'v1', name: 'A 版', plan: legacyPlan, base: [], slotMeta: [] } ];
@@ -907,8 +1027,14 @@
         var per = slotPeriod(e.slot);
         if (!per) return;
         var p = byId[e.placeId];
-        if (!p || p.hideInOverview === true) return;
-        periods[per].push({ eid: e.id, placeId: p.id, name: p.name, type: p.type, slot: e.slot, warn: cellWarning(p, day, per) });
+        var customName = e.custom && safeStr(e.custom.title).trim();
+        if ((!p && !customName) || (p && p.hideInOverview === true)) return;
+        periods[per].push({
+          eid: e.id, placeId: p ? p.id : null,
+          name: p ? p.name : customName,
+          type: p ? p.type : (e.category || e.custom.kind || '其他'),
+          slot: e.slot, warn: p ? cellWarning(p, day, per) : ''
+        });
       });
       PERIOD_KEYS.forEach(function (k) {
         periods[k].sort(function (a, b) { return slotOrderInPeriod(a.slot) - slotOrderInPeriod(b.slot); });
@@ -1105,7 +1231,7 @@
     return out;
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, defaultPer: defaultPer, normalizePlace: normalizePlace, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, setRegionNights: setRegionNights, setHotelNights: setHotelNights, splitSegTail: splitSegTail, refitBaseToRange: refitBaseToRange, mergeBaseSegs: mergeBaseSegs, reorderRegionHotels: reorderRegionHotels, removeHotelSeg: removeHotelSeg, addHotelToRegion: addHotelToRegion, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, applyWashokuPalette: applyWashokuPalette, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, occSpotlightIds: occSpotlightIds, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, slotFromTime: slotFromTime, defaultPer: defaultPer, normalizePlace: normalizePlace, normalizeOccurrence: normalizeOccurrence, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, setRegionNights: setRegionNights, setHotelNights: setHotelNights, splitSegTail: splitSegTail, refitBaseToRange: refitBaseToRange, mergeBaseSegs: mergeBaseSegs, reorderRegionHotels: reorderRegionHotels, removeHotelSeg: removeHotelSeg, addHotelToRegion: addHotelToRegion, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, applyWashokuPalette: applyWashokuPalette, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, occSpotlightIds: occSpotlightIds, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;

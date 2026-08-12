@@ -3,6 +3,7 @@ function importJSON(text){
   // 整份備份（含 versions 陣列）→ 整包還原（走 applyDb→finishLoad→migrate，升級路徑＋持久＋重繪）
   if(d && !Array.isArray(d) && Array.isArray(d.versions)){
     if(!confirm('匯入整份備份會「取代」目前所有資料（行程/卡片/版本/設定），確定？')) return;
+    if(typeof resetOverlayNavigation==='function') resetOverlayNavigation();
     applyDb(d); closeSheet(); toast('已從備份還原'); return;
   }
   // 否則＝Claude 卡片 JSON（窄）：併入 places（＋ optional plan）
@@ -125,9 +126,11 @@ let curTab='flow';
 function switchTab(pg){
   if(document.body.classList.contains('split')) exitSplit();   // 並看在粗流頁；切任何分頁＝退出並看
   if(pg!=='flow') closeDetail();                              // 切走總覽＝關桌機右欄細看（免殘留蓋住庫/預算）
+  if(pg!=='fineflow' && window.CNXFineFlowUI && typeof window.CNXFineFlowUI.resetTransient==='function') window.CNXFineFlowUI.resetTransient();
   curTab=pg;
   try{ localStorage.setItem(TAB_KEY, pg); }catch(_){}   // 記住分頁（per-device）→ reload 不跳回總覽
   document.getElementById('pg-flow').hidden = pg!=='flow';
+  document.getElementById('pg-fineflow').hidden = pg!=='fineflow';
   document.getElementById('pg-lib').hidden = pg!=='lib';      // 桌機 #pg-lib 由 CSS 恆顯示於右欄
   document.getElementById('pg-budget').hidden = pg!=='budget';
   document.querySelectorAll('.tabbtn').forEach(x=>x.classList.toggle('active',x.dataset.pg===pg));
@@ -135,7 +138,7 @@ function switchTab(pg){
 }
 function restoreTab(){   // boot：還原上次分頁（lib/budget）；flow 為預設不必動。桌機的 lib 由隨後 applyDesk 導回 flow（lib 在桌機是常駐欄、非分頁）
   const t=localStorage.getItem(TAB_KEY);
-  if(t==='lib'||t==='budget') switchTab(t);
+  if(t==='lib'||t==='budget'||t==='fineflow') switchTab(t);
 }
 let lastSync='—';
 function syncStatusText(s){ return s==='synced'?'已同步':s==='syncing'?'同步中…':s==='offline'?'離線（已存本機）':'—'; }
@@ -184,7 +187,7 @@ function cfgCatHTML(){
 function findCat(k){ return (TRIP.categories||[]).find(c=>c.key===k); }
 let cfgSaveT=null;
 function saveCfgDebounced(){ clearTimeout(cfgSaveT); cfgSaveT=setTimeout(()=>{ save(); renderAllExceptSheet(); }, 400); }
-function renderAllExceptSheet(){ updateVerBtn(); renderTopTools(); renderRibbon(); renderLib(); renderBudget(); renderMarkers(); }
+function renderAllExceptSheet(){ updateVerBtn(); renderTopTools(); renderRibbon(); renderLib(); renderBudget(); if(typeof renderFineFlow==='function') renderFineFlow(); renderMarkers(); }
 function cfgRegionHTML(){
   const rows=regionsList().map((r,i)=>{
     const lock=r.key==='其他';
@@ -246,7 +249,7 @@ document.addEventListener('input',e=>{
   saveCfgDebounced();
 });
 function updateVerBtn(){ const v=av(); document.getElementById('verbtn').innerHTML='🗂️<span class="vname"> '+esc((v&&v.name)||'A 版')+'</span><span class="vcaret"> ▾</span>'; }   /* 名字/▾ 進 span：桌機顯示全名，手機 CSS 隱藏只留 🗂️（點進去看版本）*/
-function renderAll(){ updateVerBtn(); renderTopTools(); renderRibbon(); renderLib(); renderBudget(); renderMarkers(); }
+function renderAll(){ updateVerBtn(); renderTopTools(); renderRibbon(); renderLib(); renderBudget(); if(typeof renderFineFlow==='function') renderFineFlow(); renderMarkers(); }
 const deskMq=window.matchMedia('(min-width:1100px)');
 function applyDesk(){
   applyDrag();                          // 桌機↔手機切換時更新 body.drag-on（桌機常開直接拖；手機改長按進拖、不鎖捲）

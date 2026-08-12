@@ -147,7 +147,7 @@ document.addEventListener('click',e=>{
   if(a==='flow-split'){ if(document.body.classList.contains('split')) exitSplit(); else enterSplit(); return; }
   if(a==='ovmode-toggle'){ closeDetail(); setOvMode(ovMode()==='table'?'matrix':'table'); applyOvMode(); return; }   // 手機 header 單顆切換鈕：表格↔日卡（B 精簡）
   if(a==='verbtn'){ openVersions(); return; }
-  if(a==='switchver'){ setActiveLocal(t.dataset.id); save(); renderAll(); closeSheet(); return; }   // active 本地（localStorage），不寫 DB、不進雲端文件（F15）
+  if(a==='switchver'){ navStack.length=0; if(window.CNXFineFlowUI&&typeof window.CNXFineFlowUI.resetTransient==='function') window.CNXFineFlowUI.resetTransient(); setActiveLocal(t.dataset.id); save(); renderAll(); closeSheet(); return; }   // active 本地（localStorage），不寫 DB、不進雲端文件（F15）
   if(a==='dupver'){ const name=prompt('新版本名稱', av().name+' 複本'); if(name===null) return;
     const nid=uid(); const copy=CNXCore.duplicateVersion(DB, av().id, nid, name.trim()||'新版本');
     if(copy){ setActiveLocal(nid); save(); renderAll(); openVersions(); } return; }   // 複製後自動切到新版（非破壞性：原版深拷貝、互不影響）
@@ -169,16 +169,16 @@ document.addEventListener('click',e=>{
   if(a==='om-both'||a==='om-pk'||a==='om-swap'){ const s=sh.dataset, day=s.omDay, slot=s.omSlot, pid=s.omPid;
     const lbl=((DAYS.find(x=>x.id===day)||{}).label||day)+' '+slotObj(slot).label;
     const mv=s.omMove?plan.find(e=>e.id===s.omMove):null;   // 移格模式：搬移既有 occurrence（保留 id/startTime），不新增——否則原格殘留＝重複（bug）
-    if(mv){ const pd=mv.day, ps=mv.slot; mv.day=day; mv.slot=slot;   // 把被移動的卡搬進這格（與占用者同格）
+    if(mv){ const previous=moveOccurrenceToCoarseSlot(mv,day,slot);   // 粗流搬移會清掉已失效的精確鐘點，回細流重新確認
       if(a==='om-pk'){ const wasPk=!!(CNXCore.getSlotMeta(av(),day,slot)||{}).pk; CNXCore.setSlotFlag(av(),day,slot,'pk',true); afterChange(); closeSheet();
-        toast('已移入 2 選 1・'+lbl, {undo:()=>{ mv.day=pd; mv.slot=ps; if(!wasPk) CNXCore.setSlotFlag(av(),day,slot,'pk',false); afterChange(); }}); return; }
+        toast('已移入 2 選 1・'+lbl, {undo:()=>{ restoreOccurrencePosition(mv,previous); if(!wasPk) CNXCore.setSlotFlag(av(),day,slot,'pk',false); afterChange(); }}); return; }
       if(a==='om-swap'){ const occ=plan.find(e=>e.id===t.dataset.eid), occPid=occ&&occ.placeId;
         const prevBackups=(CNXCore.getSlotMeta(av(),day,slot)||{backups:[]}).backups.slice();
         if(occ){ const i=plan.indexOf(occ); if(i>=0) plan.splice(i,1); if(occPid) CNXCore.addBackup(av(),day,slot,occPid); }   // 原占用者降備案
         afterChange(); closeSheet();
-        toast('已移入・原占用回備案', {undo:()=>{ mv.day=pd; mv.slot=ps; if(occ) plan.push(occ); const m=CNXCore.ensureSlotMeta(av(),day,slot); m.backups=prevBackups.slice(); CNXCore.pruneSlotMeta(av()); afterChange(); }}); return; }
+        toast('已移入・原占用回備案', {undo:()=>{ restoreOccurrencePosition(mv,previous); if(occ) plan.push(occ); const m=CNXCore.ensureSlotMeta(av(),day,slot); m.backups=prevBackups.slice(); CNXCore.pruneSlotMeta(av()); afterChange(); }}); return; }
       afterChange(); closeSheet();   // om-both：搬進這格、與占用者並存
-      toast('兩家都去・'+lbl, {undo:()=>{ mv.day=pd; mv.slot=ps; afterChange(); }}); return; }
+      toast('兩家都去・'+lbl, {undo:()=>{ restoreOccurrencePosition(mv,previous); afterChange(); }}); return; }
     if(a==='om-both'){ const nid=uid(); plan.push({id:nid, placeId:pid, day, slot}); afterChange(); closeSheet();
       toast('兩家都去・'+lbl, {undo:()=>{ const i=plan.findIndex(y=>y.id===nid); if(i>=0) plan.splice(i,1); afterChange(); }}); return; }
     if(a==='om-pk'){ const wasPk=!!(CNXCore.getSlotMeta(av(),day,slot)||{}).pk; const nid=uid();
@@ -409,7 +409,7 @@ document.addEventListener('click',e=>{
   if(a==='triage-skip'){ triageSkipped.add(t.dataset.id); renderTriage(); return; }
   if(a==='triage-more'){ triageShowAll=true; renderTriage(); return; }   // 展開剩餘待標列
   if(a==='triage-toggle'){ triageCollapsed=!triageCollapsed; localStorage.setItem('cnx-triage-collapsed',triageCollapsed?'1':'0'); renderTriage(); return; }
-  if(a==='reset'){ if(confirm('重設成初始資料？')){ DB=finishLoad({places:JSON.parse(JSON.stringify(SEED_PLACES)),plan:seedPlan()}); TRIP=DB.trip; DAYS=CNXCore.deriveDays(TRIP); places=DB.places; manualLines=DB.manualLines; settings=DB.settings; syncActive(); save(); renderAll(); } return; }
+  if(a==='reset'){ if(confirm('重設成初始資料？')){ if(typeof resetOverlayNavigation==='function') resetOverlayNavigation(); DB=finishLoad({places:JSON.parse(JSON.stringify(SEED_PLACES)),plan:seedPlan()}); TRIP=DB.trip; DAYS=CNXCore.deriveDays(TRIP); places=DB.places; manualLines=DB.manualLines; settings=DB.settings; syncActive(); save(); renderAll(); } return; }
   if(a==='close'){ closeSheet(); return; }
 });
 // ── 左滑刪除（pointer events＝手機觸控＋桌機滑鼠通用）：抽成共用，換將候選＋住宿規劃多飯店列共用 ──
