@@ -47,7 +47,12 @@ const SYNC_ANON='sb_publishable_u4WsC2jEAtZuughbmTnS4g_hs46ApK5';  // Supabase a
 const V2_ENV = /(^|\/)v2(\/|$)/.test(location.pathname);   // 部署在 /v2/ 子路徑＝獨立沙盒：localStorage 與正式版完全隔離（碰不到正式版的真實行程；v2 自開一份測試行程）
 const TRIPKEY=V2_ENV?'cnx-trip-id-v2':'cnx-trip-id';
 let syncCtl=null;    // 同步控制器（連上線後才有）
-const KEY=V2_ENV?'cnx-proto-v2':'cnx-proto-v10', OLDKEY=V2_ENV?'cnx-proto-v2-none':'cnx-proto-v9';
+const HASH_TRIP_ID=(location.hash.match(/t=([0-9a-f-]{36})/)||[])[1]||'';
+const STORED_TRIP_ID=localStorage.getItem(TRIPKEY)||'';
+const BOOT_TRIP_ID=HASH_TRIP_ID||STORED_TRIP_ID;
+const CACHE_KEY_BASE=V2_ENV?'cnx-proto-v2':'cnx-proto-v10', OLDKEY=V2_ENV?'cnx-proto-v2-none':'cnx-proto-v9';
+let KEY=BOOT_TRIP_ID?(CACHE_KEY_BASE+':'+BOOT_TRIP_ID):CACHE_KEY_BASE;  // 每個旅程各自一份 cache；相同雲端版號也不可能讀到別趟旅程
+function useTripCache(id){ KEY=CACHE_KEY_BASE+':'+id; localStorage.setItem(KEY,JSON.stringify(getLocalDb())); }
 let DB=load(), places=DB.places, manualLines=DB.manualLines, settings=DB.settings;
 let TRIP=DB.trip, DAYS=CNXCore.deriveDays(TRIP);
 if(CNXCore.applyWashokuPalette(TRIP)) localStorage.setItem(KEY, JSON.stringify(getLocalDb()));   // 一次性套和色初始色盤＋立即持久；flag 已 true 則不動（之後她在設定改色不被蓋）
@@ -102,7 +107,11 @@ function load(){
   try{
     const r=localStorage.getItem(KEY);
     if(r){ const d=JSON.parse(r); if(d&&d.places) return finishLoad(d); }
-    const old=localStorage.getItem(OLDKEY);
+    // per-trip cache 上線後的一次性安全搬移：只有 URL 沒有切到別趟旅程時，舊共用 cache 才能歸屬給已記住的 tripId。
+    const canAdoptShared=!!BOOT_TRIP_ID&&!!STORED_TRIP_ID&&(!HASH_TRIP_ID||HASH_TRIP_ID===STORED_TRIP_ID);
+    const shared=canAdoptShared&&localStorage.getItem(CACHE_KEY_BASE);
+    if(shared){ const sd=JSON.parse(shared); if(sd&&sd.places){ const mig=finishLoad(sd); localStorage.setItem(KEY,JSON.stringify(mig)); return mig; } }
+    const old=!BOOT_TRIP_ID&&localStorage.getItem(OLDKEY);   // 已知 trip 時不碰未綁定旅程的舊共用 cache，避免 stale 資料跨旅程
     if(old){ const od=JSON.parse(old); if(od&&od.places){ const mig=finishLoad(od); localStorage.setItem(KEY,JSON.stringify(mig)); return mig; } } // 讀舊寫新，舊 key 留作備份
   }catch(e){}
   return finishLoad({places:JSON.parse(JSON.stringify(SEED_PLACES)),plan:seedPlan()});
@@ -300,4 +309,3 @@ function nearSeg(p, seg){   // 卡片 p 是否屬該天基地「附近」：有�
   if(ref && p.lat!=null && p.lng!=null){ const d=CNXCore.distanceM(p,ref); return d!=null && d<=NEAR_M; }
   return p.area===seg.region;   // 無座標退 region 相同
 }
-

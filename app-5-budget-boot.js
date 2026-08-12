@@ -265,18 +265,32 @@ renderAll(); restoreTab(); applyDesk();   // restoreTab 在 applyDesk 前：桌�
 async function initSync(){
   if(!SYNC_URL || !SYNC_ANON) return;                 // 尚未設定 → 維持純本機
   const client = CNXSync.makeClient(SYNC_URL, SYNC_ANON);
-  let tripId = (location.hash.match(/t=([0-9a-f-]{36})/)||[])[1] || localStorage.getItem(TRIPKEY) || '';
+  let tripId = HASH_TRIP_ID || BOOT_TRIP_ID || '';
+  let createdBase = null;
   try{
     if(!tripId){                                       // 首次：用目前本機資料種一份到雲端
-      tripId = await client.createTrip(getLocalDb());
+      createdBase = JSON.parse(JSON.stringify(getLocalDb()));
+      tripId = await client.createTrip(createdBase);
       localStorage.setItem(TRIPKEY, tripId);
+      useTripCache(tripId);                            // 從未綁定 cache 切到新旅程專屬 cache
       if(!location.hash) location.hash = 't='+tripId;
     } else { localStorage.setItem(TRIPKEY, tripId); }
     const svKey=(V2_ENV?'cnx-sv-v2:':'cnx-sv:')+tripId;   // 上次同步到的雲端版本（per-device、per-trip）：boot 靠它判斷雲端有沒有領先本機，避免用雲端舊資料蓋掉還沒 push 完的本機變更（bug#1 刪卡復活）
+    const sbKey=(V2_ENV?'cnx-sync-base-v2:':'cnx-sync-base:')+tripId; // 上次同步成功的完整快照；用來證明 localStorage 差異真的是這趟旅程的未送出編輯
+    const dirtyKey=(V2_ENV?'cnx-dirty-v2:':'cnx-dirty:')+tripId;
+    if(createdBase&&JSON.stringify(getLocalDb())!==JSON.stringify(createdBase)){
+      // createTrip request 送出後又有編輯：已送出版本是可信 base，load 必須合併續送。
+      localStorage.setItem(sbKey,JSON.stringify(createdBase));
+      localStorage.setItem(dirtyKey,'1');
+    }
     syncCtl = CNXSync.createSyncController({
       client, tripId, getLocalDb, applyDb, mergeDb:CNXCore.mergeDb, onStatus:setSyncStatus,
       getSyncedVersion:function(){ const r=localStorage.getItem(svKey); return r==null?-1:(+r); },
-      setSyncedVersion:function(v){ localStorage.setItem(svKey, String(v)); }
+      setSyncedVersion:function(v){ localStorage.setItem(svKey, String(v)); },
+      getSyncedDb:function(){ try{ const r=localStorage.getItem(sbKey); return r?JSON.parse(r):null; }catch(_){ return null; } },
+      setSyncedDb:function(db){ localStorage.setItem(sbKey, JSON.stringify(db)); },
+      getLocalDirty:function(){ return localStorage.getItem(dirtyKey)==='1'; },
+      setLocalDirty:function(value){ if(value) localStorage.setItem(dirtyKey,'1'); else localStorage.removeItem(dirtyKey); }
     });
     await syncCtl.load();                              // boot 同步：雲端領先才覆蓋、否則保留本機（見 sync.js load）
     syncCtl.startPolling();

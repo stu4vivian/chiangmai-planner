@@ -21,7 +21,7 @@
     suppressCardClick: false,
     suppressCalendarClick: false
   };
-  var calendarSwipe = null;
+  var calendarScrollTimer = null;
   var uiStore = window.CNXFineFlowCalendarState && typeof window.CNXFineFlowCalendarState.createStore === 'function' ?
     window.CNXFineFlowCalendarState.createStore() : null;
 
@@ -441,8 +441,13 @@
     var count = calendarVisibleDays();
     var mobile = !calendarIsDesktop();
     state.calendarDesktop = !mobile;
-    var trackAnchor = mobile ? addDays(calendarAnchor(), -1) : calendarAnchor();
-    var trackCount = mobile ? count + 2 : count;
+    var tripStart = typeof TRIP !== 'undefined' && TRIP && TRIP.startDate;
+    var tripEnd = typeof TRIP !== 'undefined' && TRIP && TRIP.endDate;
+    var mobileTrackCount = /^\d{4}-\d{2}-\d{2}$/.test(tripStart || '') && /^\d{4}-\d{2}-\d{2}$/.test(tripEnd || '') ?
+      Math.max(count, Math.round((Date.parse(tripEnd + 'T00:00:00Z') - Date.parse(tripStart + 'T00:00:00Z')) / 86400000) + 1) : count;
+    var trackAnchor = mobile ? (tripStart || calendarAnchor()) : calendarAnchor();
+    var trackCount = mobile ? mobileTrackCount : count;
+    var anchorIndex = mobile ? Math.max(0, Math.round((Date.parse(calendarAnchor() + 'T00:00:00Z') - Date.parse(trackAnchor + 'T00:00:00Z')) / 86400000)) : 0;
     var dates = api.buildDateWindow(trackAnchor, trackCount);
     var schedules = dates.map(function (date) {
       var dayId = dayIdForDate(date);
@@ -466,12 +471,13 @@
       day.conflictIds = calendarIssueIds(schedules[index]);
     });
     projection.trackDays = projection.days;
-    projection.days = mobile ? projection.trackDays.slice(1, count + 1) : projection.trackDays.slice();
+    projection.days = mobile ? projection.trackDays.slice(anchorIndex, anchorIndex + count) : projection.trackDays.slice();
     projection.dates = projection.days.map(function (day) { return day.date; });
     projection.unscheduledCount = projection.days.reduce(function (total, day) { return total + (day.unscheduled || []).length; }, 0);
     projection.visibleDayCount = count;
     projection.trackDayCount = trackCount;
-    projection.trackOffset = mobile ? -100 / trackCount : 0;
+    projection.trackOffset = 0;
+    projection.anchorIndex = anchorIndex;
     projection.mobile = mobile;
     projection.pixelsPerHour = pixelsPerHour;
     projection.versionId = version.id;
@@ -550,18 +556,18 @@
     }).join('');
     var days = model.trackDays.map(function (day) {
       var visible = !!visibleDates[day.date];
-      return '<section class="ff-cal-day' + (visible ? '' : ' is-buffer') + '" data-date="' + h(day.date) + '" data-day="' + h(day.dayId) + '" data-visible="' + visible + '" aria-label="' + h(day.date) + '"' + (visible ? '' : ' aria-hidden="true" inert') + '>' +
+      return '<section class="ff-cal-day' + (visible ? '' : ' is-buffer') + '" data-date="' + h(day.date) + '" data-day="' + h(day.dayId) + '" data-visible="' + visible + '" data-unscheduled-count="' + (day.unscheduled || []).length + '" data-card-count="' + day.cards.length + '" aria-label="' + h(day.date) + '"' + (visible ? '' : ' aria-hidden="true" inert') + '>' +
         renderSlots(day) + renderCreateDraft(day) + day.cards.map(function (card) { return renderCalendarCard(card, day); }).join('') + '</section>';
     }).join('');
     var unscheduledItems = [];
-    model.days.forEach(function (day) { (day.unscheduled || []).forEach(function (item) { unscheduledItems.push(item); }); });
+    model.trackDays.forEach(function (day) { (day.unscheduled || []).forEach(function (item) { unscheduledItems.push(item); }); });
     var hiddenUnscheduled = unscheduledItems.map(function (item) { return '<span hidden data-action="ff-edit" data-eid="' + h(item.id) + '"></span>'; }).join('');
-    var unplanned = model.unscheduledCount ? '<button type="button" class="ff-cal-unscheduled" data-action="ff-unscheduled"><span>尚未排時間</span><b>□ ' + model.unscheduledCount + '</b></button>' + hiddenUnscheduled : '';
-    var empty = model.days.every(function (day) { return !day.cards.length; }) ? '<p class="ff-cal-empty">點空白時段，或按右下角＋開始排細流</p>' : '';
+    var unplanned = '<button type="button" class="ff-cal-unscheduled" data-action="ff-unscheduled"' + (model.unscheduledCount ? '' : ' hidden') + '><span>尚未排時間</span><b>□ ' + model.unscheduledCount + '</b></button>' + hiddenUnscheduled;
+    var empty = '<p class="ff-cal-empty"' + (model.days.every(function (day) { return !day.cards.length; }) ? '' : ' hidden') + '>點空白時段，或按右下角＋開始排細流</p>';
     var choices = model.mobile ? [1, 2, 3] : [5, 7];
     var switcher = '<div class="ff-cal-view-switch" aria-label="顯示天數">' + choices.map(function (choice) { return '<button type="button" data-action="ff-calendar-count" data-count="' + choice + '" aria-pressed="' + (choice === model.visibleDayCount) + '">' + choice + (model.mobile && choice === 3 ? ' 日' : '') + '</button>'; }).join('') + '</div>';
     var stepLabel = model.mobile ? '一天' : model.visibleDayCount + '天';
-    return '<div class="ff-calendar" data-version="' + h(model.versionId) + '" data-mobile="' + model.mobile + '" style="--ff-cal-columns:' + model.visibleDayCount + ';--ff-cal-track-columns:' + model.trackDayCount + ';--ff-cal-hour:' + model.pixelsPerHour + 'px;--ff-cal-height:' + model.pixelsPerHour * 24 + 'px;--ff-track-offset:' + model.trackOffset + '%">' +
+    return '<div class="ff-calendar" data-version="' + h(model.versionId) + '" data-mobile="' + model.mobile + '" data-anchor-index="' + model.anchorIndex + '" style="--ff-cal-columns:' + model.visibleDayCount + ';--ff-cal-track-columns:' + model.trackDayCount + ';--ff-cal-hour:' + model.pixelsPerHour + 'px;--ff-cal-height:' + model.pixelsPerHour * 24 + 'px;--ff-track-offset:' + model.trackOffset + '%">' +
       '<div class="ff-cal-toolbar"><button type="button" class="ff-cal-nav" data-action="ff-prev-days" aria-label="往前' + stepLabel + '">‹</button><div class="ff-cal-range"><span>' + model.visibleDayCount + ' 日行程</span><strong>' + h(model.days[0].date + ' ～ ' + model.days[model.days.length - 1].date) + '</strong></div>' + switcher + '<button type="button" class="ff-cal-nav" data-action="ff-next-days" aria-label="往後' + stepLabel + '">›</button></div>' +
       unplanned + '<div class="ff-cal-date-row"><span class="ff-cal-date-spacer"></span><div class="ff-cal-date-viewport"><div class="ff-cal-date-track">' + dates + '</div></div></div>' +
       '<div class="ff-cal-scroll">' + renderTimeGutter() + '<div class="ff-cal-days-viewport"><div class="ff-cal-days">' + days + '</div></div>' + empty + '</div>' +
@@ -572,6 +578,7 @@
   function renderFineFlow() {
     var root = document.getElementById(rootId);
     if (!root) return;
+    clearTimeout(calendarScrollTimer);
     var priorScroll = root.querySelector('.ff-cal-scroll');
     var priorScrollTop = priorScroll ? priorScroll.scrollTop : null;
     root.setAttribute('aria-busy', state.loading ? 'true' : 'false');
@@ -596,6 +603,7 @@
           if (currentScroll && currentScroll.scrollTop === 0) currentScroll.scrollTop = initialScrollTop;
         }, 80);
       }
+      setupCalendarNativeScroll(root.querySelector('.ff-calendar'));
     } catch (err) {
       state.error = err && err.message ? err.message : '發生未預期的錯誤';
       renderFineFlow();
@@ -1296,7 +1304,16 @@
   }
 
   function openUnscheduled() {
-    var rows = activePlan().filter(function (item) { return !item.fine; }).map(function (item) {
+    var version = activeVersion();
+    var api = calendarApi();
+    var dates = api.buildDateWindow ? api.buildDateWindow(calendarAnchor(), calendarVisibleDays()) : [calendarAnchor()];
+    var items = [];
+    dates.forEach(function (date) {
+      var dayId = dayIdForDate(date);
+      var parts = scheduleParts(buildSchedule(version, dayId), dayId, version);
+      (parts.unplanned || []).forEach(function (item) { items.push(item); });
+    });
+    var rows = items.map(function (item) {
       return '<button type="button" class="ff-source-place-row" data-action="ff-unscheduled-edit" data-eid="' + h(item.id) + '"><b>' + h(occurrenceTitle(item)) + '</b><small>設定日期與時間</small></button>';
     }).join('');
     openSheet('<div class="ff-sheet ff-unscheduled-sheet" role="dialog" aria-modal="true"><div class="ff-sheet-head"><span class="ff-kicker">細流</span><h3>尚未排時間</h3></div><div class="ff-sheet-scroll">' + (rows || '<div class="ff-sheet-empty">目前沒有未排項目</div>') + '</div></div>', function () { openUnscheduled(); }, 'fineflow-unscheduled');
@@ -1509,65 +1526,98 @@
     if (action === 'ff-retry') { state.error = ''; renderFineFlow(); }
   });
 
-  function setCalendarSwipeOffset(pixels, settling) {
-    var root = document.getElementById(rootId);
-    var calendar = root && root.querySelector('.ff-calendar');
-    if (!calendar) return;
-    calendar.classList.toggle('is-swiping', !settling);
-    calendar.classList.toggle('is-settling', !!settling);
-    calendar.style.setProperty('--ff-drag-x', pixels + 'px');
+  // 手機日期切換交給瀏覽器原生水平捲動與 scroll snap。整段旅程只 render 一次，
+  // scroll 過程不拆 DOM，使用者可在前一次慣性尚未完全停止時接著滑下一天。
+  function calendarDayWidth(viewport) {
+    if (!viewport) return 0;
+    var width = viewport.clientWidth || (viewport.getBoundingClientRect && viewport.getBoundingClientRect().width) || 0;
+    return width / calendarVisibleDays();
   }
 
-  function beginCalendarSwipe(event) {
-    if (calendarIsDesktop() || event.pointerType !== 'touch' || calendarSwipe || document.body.classList.contains('ff-pointer-active')) return;
-    if (!event.target.closest('.ff-cal-date-viewport, .ff-cal-days-viewport')) return;
-    if (event.target.closest('.ff-cal-card, .ff-cal-resize, .ff-cal-view-switch, .ff-cal-fab')) return;
-    calendarSwipe = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, dx: 0, axis: null };
-  }
-
-  function moveCalendarSwipe(event) {
-    var swipe = calendarSwipe;
-    if (!swipe || swipe.pointerId !== event.pointerId) return;
-    var dx = event.clientX - swipe.startX;
-    var dy = event.clientY - swipe.startY;
-    if (swipe.axis == null && Math.hypot(dx, dy) > 8) swipe.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
-    if (swipe.axis === 'y') { calendarSwipe = null; return; }
-    if (swipe.axis !== 'x') return;
-    if (document.body.classList.contains('ff-pointer-active')) { calendarSwipe = null; setCalendarSwipeOffset(0, true); return; }
-    event.preventDefault();
-    swipe.dx = dx;
-    var atStart = calendarAnchor() === clampCalendarAnchor(addDays(calendarAnchor(), -1));
-    var atEnd = calendarAnchor() === clampCalendarAnchor(addDays(calendarAnchor(), 1));
-    var resistance = (atStart && dx > 0) || (atEnd && dx < 0) ? 0.28 : 1;
-    setCalendarSwipeOffset(dx * resistance, false);
-  }
-
-  function finishCalendarSwipe(event, cancelled) {
-    var swipe = calendarSwipe;
-    if (!swipe || swipe.pointerId !== event.pointerId) return;
-    calendarSwipe = null;
-    if (swipe.axis !== 'x' || cancelled) { setCalendarSwipeOffset(0, true); return; }
-    var root = document.getElementById(rootId);
-    var viewport = root && root.querySelector('.ff-cal-days-viewport');
-    var columnWidth = viewport ? viewport.getBoundingClientRect().width / calendarVisibleDays() : 0;
-    var threshold = Math.min(72, Math.max(34, columnWidth * 0.2));
-    var delta = Math.abs(swipe.dx) >= threshold ? (swipe.dx < 0 ? 1 : -1) : 0;
-    var next = delta ? clampCalendarAnchor(addDays(calendarAnchor(), delta)) : calendarAnchor();
-    if (!delta || next === calendarAnchor()) { setCalendarSwipeOffset(0, true); return; }
-    state.suppressCalendarClick = true;
-    setTimeout(function () { state.suppressCalendarClick = false; }, 500);
-    setCalendarSwipeOffset(delta > 0 ? -columnWidth : columnWidth, true);
-    setTimeout(function () {
-      state.anchorDate = next;
+  function updateCalendarScrollPosition(calendar, index) {
+    if (!calendar || calendar.dataset.mobile !== 'true') return;
+    var dates = Array.prototype.slice.call(calendar.querySelectorAll('.ff-cal-date'));
+    var days = Array.prototype.slice.call(calendar.querySelectorAll('.ff-cal-day'));
+    var visibleCount = calendarVisibleDays();
+    var maximum = Math.max(0, days.length - visibleCount);
+    index = clamp(Math.round(index || 0), 0, maximum);
+    var anchor = days[index] && days[index].dataset.date;
+    if (anchor && state.anchorDate !== anchor) {
+      state.anchorDate = anchor;
       state.selectedId = null;
-      renderFineFlow();
-    }, 250);
+    }
+    calendar.dataset.anchorIndex = String(index);
+    dates.forEach(function (date, dateIndex) {
+      var visible = dateIndex >= index && dateIndex < index + visibleCount;
+      date.classList.toggle('is-buffer', !visible);
+      date.dataset.visible = String(visible);
+      if (visible) date.removeAttribute('aria-hidden');
+      else date.setAttribute('aria-hidden', 'true');
+    });
+    days.forEach(function (day, dayIndex) {
+      var visible = dayIndex >= index && dayIndex < index + visibleCount;
+      day.classList.toggle('is-buffer', !visible);
+      day.dataset.visible = String(visible);
+      if (visible) { day.removeAttribute('aria-hidden'); day.removeAttribute('inert'); }
+      else { day.setAttribute('aria-hidden', 'true'); day.setAttribute('inert', ''); }
+    });
+    var range = calendar.querySelector('.ff-cal-range strong');
+    if (range && days[index]) range.textContent = days[index].dataset.date + ' ～ ' + days[Math.min(days.length - 1, index + visibleCount - 1)].dataset.date;
+    var visibleDays = days.slice(index, index + visibleCount);
+    var unscheduledCount = visibleDays.reduce(function (total, day) { return total + (+day.dataset.unscheduledCount || 0); }, 0);
+    var unscheduled = calendar.querySelector('.ff-cal-unscheduled');
+    if (unscheduled) {
+      unscheduled.hidden = !unscheduledCount;
+      var unscheduledBadge = unscheduled.querySelector('b');
+      if (unscheduledBadge) unscheduledBadge.textContent = '□ ' + unscheduledCount;
+    }
+    var empty = calendar.querySelector('.ff-cal-empty');
+    if (empty) empty.hidden = visibleDays.some(function (day) { return (+day.dataset.cardCount || 0) > 0; });
   }
 
-  document.addEventListener('pointerdown', beginCalendarSwipe);
-  document.addEventListener('pointermove', moveCalendarSwipe, { passive: false });
-  document.addEventListener('pointerup', function (event) { finishCalendarSwipe(event, false); });
-  document.addEventListener('pointercancel', function (event) { finishCalendarSwipe(event, true); });
+  function settleCalendarNativeScroll(calendar, source) {
+    if (!calendar || !source || calendar.dataset.mobile !== 'true') return;
+    var width = calendarDayWidth(source);
+    if (!(width > 0)) return;
+    var index = clamp(Math.round(source.scrollLeft / width), 0, Math.max(0, calendar.querySelectorAll('.ff-cal-day').length - calendarVisibleDays()));
+    updateCalendarScrollPosition(calendar, index);
+  }
+
+  function setupCalendarNativeScroll(calendar) {
+    if (!calendar || calendar.dataset.mobile !== 'true') return;
+    var dateViewport = calendar.querySelector('.ff-cal-date-viewport');
+    var dayViewport = calendar.querySelector('.ff-cal-days-viewport');
+    if (!dateViewport || !dayViewport) return;
+    var syncing = false;
+    function sync(source, target) {
+      if (syncing) return;
+      calendar.dataset.scrollStarted = 'true';
+      syncing = true;
+      target.scrollLeft = source.scrollLeft;
+      settleCalendarNativeScroll(calendar, source);
+      syncing = false;
+      clearTimeout(calendarScrollTimer);
+      calendarScrollTimer = setTimeout(function () { settleCalendarNativeScroll(calendar, source); }, 90);
+    }
+    dayViewport.addEventListener('scroll', function () { sync(dayViewport, dateViewport); }, { passive: true });
+    dateViewport.addEventListener('scroll', function () { sync(dateViewport, dayViewport); }, { passive: true });
+    if ('onscrollend' in window) {
+      dayViewport.addEventListener('scrollend', function () { settleCalendarNativeScroll(calendar, dayViewport); });
+      dateViewport.addEventListener('scrollend', function () { settleCalendarNativeScroll(calendar, dateViewport); });
+    }
+    var initialIndex = +calendar.dataset.anchorIndex || 0;
+    var placeAtAnchor = function () {
+      var width = calendarDayWidth(dayViewport);
+      if (!(width > 0)) return false;
+      dayViewport.scrollLeft = initialIndex * width;
+      dateViewport.scrollLeft = dayViewport.scrollLeft;
+      updateCalendarScrollPosition(calendar, initialIndex);
+      return true;
+    };
+    if (!placeAtAnchor() && typeof requestAnimationFrame === 'function') requestAnimationFrame(function () {
+      if (calendar.dataset.scrollStarted !== 'true') placeAtAnchor();
+    });
+  }
 
   // ── 多日曆直接操作：座標計算與交易引擎間只透過 adapter 交接。 ──
   var POINTER_SNAP = 15;
