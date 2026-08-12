@@ -225,6 +225,37 @@
     };
   }
 
+  function normalizeCoarseOccurrenceIds(value, version, index, externalId, errors) {
+    if (value == null) return [];
+    if (!Array.isArray(value)) {
+      errors.push(problem(index, externalId, 'coarseOccurrenceIds', 'INVALID_COARSE_OCCURRENCE_IDS', 'coarseOccurrenceIds 必須是陣列'));
+      return [];
+    }
+    var planById = {};
+    (version && Array.isArray(version.plan) ? version.plan : []).forEach(function (occurrence) {
+      if (occurrence && typeof occurrence.id === 'string' && occurrence.id) planById[occurrence.id] = occurrence;
+    });
+    var seen = {};
+    var out = [];
+    value.forEach(function (rawId, coarseIndex) {
+      var id = text(rawId);
+      var field = 'coarseOccurrenceIds[' + coarseIndex + ']';
+      if (!id) {
+        errors.push(problem(index, externalId, field, 'INVALID_COARSE_OCCURRENCE_ID', '粗流 occurrence ID 不可為空'));
+      } else if (seen[id]) {
+        errors.push(problem(index, externalId, field, 'DUPLICATE_COARSE_OCCURRENCE_ID', '同一細流不可重複覆蓋同一張粗流卡'));
+      } else if (!planById[id]) {
+        errors.push(problem(index, externalId, field, 'COARSE_OCCURRENCE_NOT_FOUND', '找不到要覆蓋的粗流 occurrence', { occurrenceId: id }));
+      } else if (planById[id].fine) {
+        errors.push(problem(index, externalId, field, 'COARSE_OCCURRENCE_ALREADY_FINE', '只能覆蓋尚未細排的粗流 occurrence', { occurrenceId: id }));
+      } else {
+        seen[id] = true;
+        out.push(id);
+      }
+    });
+    return out;
+  }
+
   function resolveSource(item, places, core, index, externalId, errors, needsInput) {
     var source = item.source;
     if (!source || typeof source !== 'object' || Array.isArray(source)) {
@@ -312,6 +343,7 @@
 
     var constraints = durationMin > 0 ? normalizeConstraints(item.constraints, durationMin, index, externalId, errors) : null;
     var todos = validateTodos(item.todos, externalId, index, errors);
+    var coarseOccurrenceIds = normalizeCoarseOccurrenceIds(item.coarseOccurrenceIds, context.version, index, externalId, errors);
     var source = resolveSource(item, context.places, context.core, index, externalId, errors, needsInput);
     if (errors.length || needsInput.length || !externalId || !title || !startAt || !endAt || !constraints || !source) {
       return { errors: errors, needsInput: needsInput, occurrence: null };
@@ -321,7 +353,9 @@
     var occurrence = {
       id: occurrenceIdFor(externalId),
       placeId: source.place ? source.place.id : null,
-      custom: isCustom ? { title: title, kind: text(item.category) || 'life' } : null,
+      // custom.title 也是單次行程標題覆寫；placeId 仍保留既有卡片關聯。
+      // 這讓「夜市 → 甜點」等合併行程不會被卡片名稱縮成單一地點。
+      custom: { title: title, kind: text(item.category) || 'life' },
       day: text(item.date).slice(5, 7) + text(item.date).slice(8, 10),
       // 匯入細流預設不加入粗流；開始時間只用於 fine，不替使用者決定粗流位置。
       slot: null,
@@ -346,7 +380,8 @@
       // 卡片本身的 Maps 由 place.mapsUrl 顯示；這裡只保存本次行程明示的額外連結。
       mapLinks: normalizeMapLinks(item),
       seq: index,
-      startTime: text(item.startTime)
+      startTime: text(item.startTime),
+      coarseOccurrenceIds: coarseOccurrenceIds
     };
     occurrence = context.core.normalizeOccurrence(occurrence);
     if (!occurrence || !occurrence.fine) {
@@ -430,6 +465,7 @@
         timeZone: payload.tripTimeZone,
         places: places,
         core: core,
+        version: version,
         options: options
       });
       result.errors = result.errors.concat(converted.errors);

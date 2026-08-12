@@ -125,7 +125,14 @@
   }
 
   function buildDaySchedule(version, day, trip) {
-    var all = (version && Array.isArray(version.plan) ? version.plan : [])
+    var plan = version && Array.isArray(version.plan) ? version.plan : [];
+    var coveredCoarseIds = {};
+    plan.forEach(function (item) {
+      if (!item || !item.fine || !Array.isArray(item.coarseOccurrenceIds)) return;
+      item.coarseOccurrenceIds.forEach(function (id) { if (typeof id === 'string' && id) coveredCoarseIds[id] = true; });
+    });
+    var all = plan
+      .filter(function (item) { return item && !coveredCoarseIds[item.id]; })
       .filter(function (item) { return item && scheduleDayId(item) === day; })
       .map(function (item) { return normalizeFineOccurrence(item, trip || {}); });
     var items = [];

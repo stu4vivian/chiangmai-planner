@@ -349,7 +349,8 @@
   }
   function normalizeCustom(value) {
     if (!value || typeof value !== 'object') return null;
-    var title = safeStr(value.title).trim();
+    // occurrence 標題在所有畫面輸出前都會 escape；保留店名中的正常 &，仍剝除可形成標籤／屬性的字元。
+    var title = (typeof value.title === 'string' ? value.title.replace(/[<>"']/g, '') : '').trim();
     if (!title) return null;
     return { title: title, kind: safeStr(value.kind).trim() || 'life' };
   }
@@ -403,10 +404,20 @@
     return (Array.isArray(value) ? value : []).map(function (link) {
       if (typeof link === 'string') link = { url: link };
       if (!link || typeof link !== 'object') return null;
-      var url = safeStr(link.url).trim();
+      // URL 由 scheme 驗證並在畫面輸出時 escape；不可移除 query string 必要的 &。
+      var url = (typeof link.url === 'string') ? link.url.trim() : '';
       if (!/^https?:\/\//i.test(url) || seen[url]) return null;
       seen[url] = true;
       return { label: safeStr(link.label).trim(), url: url, placeId: (typeof link.placeId === 'string' && link.placeId) ? link.placeId : null };
+    }).filter(Boolean);
+  }
+  function normalizeCoarseOccurrenceIds(value) {
+    var seen = {};
+    return (Array.isArray(value) ? value : []).map(function (id) {
+      id = (typeof id === 'string') ? id.trim() : '';
+      if (!id || seen[id]) return null;
+      seen[id] = true;
+      return id;
     }).filter(Boolean);
   }
   function slotFromTime(time) {
@@ -473,6 +484,8 @@
       mapLinks: normalizeMapLinks(e.mapLinks),
       seq: (typeof e.seq === 'number' && isFinite(e.seq)) ? e.seq : 0
     };
+    var coarseOccurrenceIds = normalizeCoarseOccurrenceIds(e.coarseOccurrenceIds);
+    if (coarseOccurrenceIds.length) out.coarseOccurrenceIds = coarseOccurrenceIds;
     if (typeof e.startTime === 'string' && e.startTime) out.startTime = e.startTime;
     return out;
   }
@@ -569,8 +582,12 @@
   function occurrenceContribs(plan, places) {
     var byId = {};
     (places || []).forEach(function (p) { byId[p.id] = p; });
+    var occurrenceIds = {};
+    (plan || []).forEach(function (e) { if (e && e.id) occurrenceIds[e.id] = true; });
     var out = [];
     (plan || []).forEach(function (e) {
+      // 細流只是根粗流的時間化投影時，費用仍由根卡計一次。
+      if (e && e.fine && Array.isArray(e.coarseOccurrenceIds) && e.coarseOccurrenceIds.some(function (id) { return occurrenceIds[id] && id !== e.id; })) return;
       var p = byId[e.placeId];
       if (!p || !p.cost || typeof p.cost.amount !== 'number') return;
       out.push({
