@@ -50,7 +50,10 @@
 
   function slotFromTime(time) {
     if (defaultCore && typeof defaultCore.slotFromTime === 'function') return defaultCore.slotFromTime(time);
-    var hour = Number(text(time).slice(0, 2));
+    var match = text(time).trim().match(/^(\d{2}):(\d{2})$/);
+    if (!match) return null;
+    var hour = Number(match[1]), minute = Number(match[2]);
+    if (hour > 23 || minute > 59) return null;
     if (hour < 9) return 'breakfast';
     if (hour < 12) return 'am';
     if (hour < 14) return 'lunch';
@@ -60,9 +63,8 @@
     return 'night';
   }
 
-  function normalizeMapLinks(item, source) {
+  function normalizeMapLinks(item) {
     var links = Array.isArray(item.mapLinks) ? item.mapLinks.slice() : [];
-    if (source.mapsUrl) links.unshift({ label: text(item.title), url: source.mapsUrl, placeId: source.place && source.place.id || null });
     var seen = {};
     return links.map(function (link) {
       if (typeof link === 'string') link = { url: link };
@@ -321,7 +323,8 @@
       placeId: source.place ? source.place.id : null,
       custom: isCustom ? { title: title, kind: text(item.category) || 'life' } : null,
       day: text(item.date).slice(5, 7) + text(item.date).slice(8, 10),
-      slot: slotFromTime(item.startTime),
+      // 匯入細流預設不加入粗流；開始時間只用於 fine，不替使用者決定粗流位置。
+      slot: null,
       fine: {
         startAt: startAt,
         endAt: endAt,
@@ -340,7 +343,8 @@
       todos: todos,
       category: text(item.category) || (source.place && text(source.place.type)) || '其他',
       notes: text(item.notes),
-      mapLinks: normalizeMapLinks(item, source),
+      // 卡片本身的 Maps 由 place.mapsUrl 顯示；這裡只保存本次行程明示的額外連結。
+      mapLinks: normalizeMapLinks(item),
       seq: index,
       startTime: text(item.startTime)
     };

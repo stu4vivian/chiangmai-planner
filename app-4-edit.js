@@ -169,14 +169,14 @@ document.addEventListener('click',e=>{
   if(a==='om-both'||a==='om-pk'||a==='om-swap'){ const s=sh.dataset, day=s.omDay, slot=s.omSlot, pid=s.omPid;
     const lbl=((DAYS.find(x=>x.id===day)||{}).label||day)+' '+slotObj(slot).label;
     const mv=s.omMove?plan.find(e=>e.id===s.omMove):null;   // 移格模式：搬移既有 occurrence（保留 id/startTime），不新增——否則原格殘留＝重複（bug）
-    if(mv){ const previous=moveOccurrenceToCoarseSlot(mv,day,slot);   // 粗流搬移會清掉已失效的精確鐘點，回細流重新確認
+    if(mv){ const previous=moveOccurrenceToCoarseSlot(mv,day,slot);   // 粗流搬移只調整大方向，細流精確時間保持不變
       if(a==='om-pk'){ const wasPk=!!(CNXCore.getSlotMeta(av(),day,slot)||{}).pk; CNXCore.setSlotFlag(av(),day,slot,'pk',true); afterChange(); closeSheet();
         toast('已移入 2 選 1・'+lbl, {undo:()=>{ restoreOccurrencePosition(mv,previous); if(!wasPk) CNXCore.setSlotFlag(av(),day,slot,'pk',false); afterChange(); }}); return; }
       if(a==='om-swap'){ const occ=plan.find(e=>e.id===t.dataset.eid), occPid=occ&&occ.placeId;
         const prevBackups=(CNXCore.getSlotMeta(av(),day,slot)||{backups:[]}).backups.slice();
-        if(occ){ const i=plan.indexOf(occ); if(i>=0) plan.splice(i,1); if(occPid) CNXCore.addBackup(av(),day,slot,occPid); }   // 原占用者降備案
+        if(occ){ const i=plan.indexOf(occ); if(occ.fine) occ.slot=null; else if(i>=0) plan.splice(i,1); if(occPid) CNXCore.addBackup(av(),day,slot,occPid); }   // 有細流時間的原占用者只退出粗流，不連細流一起刪掉
         afterChange(); closeSheet();
-        toast('已移入・原占用回備案', {undo:()=>{ restoreOccurrencePosition(mv,previous); if(occ) plan.push(occ); const m=CNXCore.ensureSlotMeta(av(),day,slot); m.backups=prevBackups.slice(); CNXCore.pruneSlotMeta(av()); afterChange(); }}); return; }
+        toast('已移入・原占用回備案', {undo:()=>{ restoreOccurrencePosition(mv,previous); if(occ){ if(!plan.some(x=>x.id===occ.id)) plan.push(occ); occ.slot=slot; } const m=CNXCore.ensureSlotMeta(av(),day,slot); m.backups=prevBackups.slice(); CNXCore.pruneSlotMeta(av()); afterChange(); }}); return; }
       afterChange(); closeSheet();   // om-both：搬進這格、與占用者並存
       toast('兩家都去・'+lbl, {undo:()=>{ restoreOccurrencePosition(mv,previous); afterChange(); }}); return; }
     if(a==='om-both'){ const nid=uid(); plan.push({id:nid, placeId:pid, day, slot}); afterChange(); closeSheet();
@@ -229,10 +229,10 @@ document.addEventListener('click',e=>{
   if(a==='op-remove'){ const eid=sh.dataset.opEid, en=plan.find(x=>x.id===eid); if(!en) return;
     const lbl=(DAYS.find(x=>x.id===en.day)||{}).label+' '+slotObj(en.slot).label, snap=Object.assign({},en);
     const wasPk=!!(CNXCore.getSlotMeta(av(),en.day,en.slot)||{}).pk;   // 快照 pk，undo 還原
-    const ri=plan.indexOf(en); plan.splice(ri,1);
+    const ri=plan.indexOf(en); if(en.fine) en.slot=null; else plan.splice(ri,1);   // 已有細流安排時，「拿掉」只代表不再顯示於粗流
     if(plan.filter(x=>x.day===snap.day&&x.slot===snap.slot).length<=1) CNXCore.setSlotFlag(av(),snap.day,snap.slot,'pk',false);   // 降到 ≤1 占用→清 2選1（否則 ribbon 殘留徽章＋裁決區仍出）
     afterChange(); closeSheet();
-    toast('已回板凳・'+lbl, {undo:()=>{ if(!plan.some(x=>x.id===snap.id)) plan.push(Object.assign({},snap)); if(wasPk) CNXCore.setSlotFlag(av(),snap.day,snap.slot,'pk',true); afterChange(); }}); return; }
+    toast((snap.fine?'已從粗流隱藏・':'已回板凳・')+lbl, {undo:()=>{ const current=plan.find(x=>x.id===snap.id); if(current) current.slot=snap.slot; else plan.push(Object.assign({},snap)); if(wasPk) CNXCore.setSlotFlag(av(),snap.day,snap.slot,'pk',true); afterChange(); }}); return; }
   if(a==='op-swap'){ const eid=sh.dataset.opEid, pid=t.dataset.pid; if(!plan.some(x=>x.id===eid)) return;
     const r=CNXCore.swapOccurrence(av(), eid, pid, {demote:true}); afterChange();
     if(r&&r.demoted===false) toast('備案已滿，原卡回板凳');
@@ -243,24 +243,15 @@ document.addEventListener('click',e=>{
   if(a==='op-keep'){ const keepId=t.dataset.eid, keep=plan.find(x=>x.id===keepId); if(!keep) return;
     const day=keep.day, slot=keep.slot, pp=getPlace(keep.placeId);
     const wasPk=!!(CNXCore.getSlotMeta(av(),day,slot)||{}).pk;   // 復原用：pk 旗標快照（2選1 格通常為 true）
-    const losers=plan.filter(x=>x.day===day&&x.slot===slot&&x.id!==keepId).map(x=>Object.assign({},x));   // 被刪的敗方 occurrence 深拷貝（含 id/placeId/day/slot/startTime）→ 復原能完整還原，不再是不可逆刪除
-    av().plan=plan.filter(x=>!(x.day===day&&x.slot===slot&&x.id!==keepId)); syncActive();
+    const losers=plan.filter(x=>x.day===day&&x.slot===slot&&x.id!==keepId).map(x=>Object.assign({},x));
+    plan.filter(x=>x.day===day&&x.slot===slot&&x.id!==keepId).forEach(x=>{ if(x.fine) x.slot=null; });
+    av().plan=plan.filter(x=>x.id===keepId||x.day!==day||x.slot!==slot||!!x.fine); syncActive();   // 敗方若已有細流安排，只退出粗流；沒有細流才真正回板凳
     CNXCore.setSlotFlag(av(),day,slot,'pk',false); afterChange(); closeSheet();
     toast('已留「'+((pp&&pp.name)||'這家')+'」、清掉 2 選 1', {undo:()=>{
-      losers.forEach(l=>{ if(!plan.some(x=>x.id===l.id)) plan.push(Object.assign({},l)); });   // 推回敗方（含 startTime）
+      losers.forEach(l=>{ const current=plan.find(x=>x.id===l.id); if(current) current.slot=l.slot; else plan.push(Object.assign({},l)); });
       if(wasPk) CNXCore.setSlotFlag(av(),day,slot,'pk',true);                                   // 還原 2選1 旗標
       afterChange(); }}); return; }
   if(a==='op-edit'){ const eid=sh.dataset.opEid, en=plan.find(x=>x.id===eid); if(!en) return; openEdit(en.placeId); return; }   // 已排面板→編輯卡；存檔/取消後自動回換將中心（openSheet 巢狀返回）
-  if(a==='settime'){ const en=plan.find(x=>x.id===t.dataset.eid); if(!en) return;
-    document.querySelectorAll('input[data-tpx]').forEach(n=>n.remove());
-    const inp=document.createElement('input'); inp.type='time'; inp.value=en.startTime||'';
-    inp.style.cssText='position:fixed;opacity:0;pointer-events:none';
-    inp.dataset.tpx='1'; inp.tabIndex=-1;
-    document.body.appendChild(inp);
-    inp.addEventListener('change',()=>{ if(inp.value) en.startTime=inp.value; else delete en.startTime;
-      afterChange(); });   // afterChange→renderRibbon 重繪總覽／並看 mini；不再重開 sheet
-    inp.addEventListener('blur',()=>inp.remove());
-    inp.showPicker ? inp.showPicker() : inp.click(); return; }
   if(a==='cleartent'){ CNXCore.setSlotFlag(av(), t.dataset.day, t.dataset.slot, 'tentative', false); afterChange(); return; }   // 同上：afterChange 已就地重繪
   if(a==='openbase'){ openBase(); return; }
   if(a==='edit-region-dates'){ openSegDates(t.dataset.seg, 'region'); return; }   // 區域總晚（優先層級）

@@ -56,6 +56,15 @@
     return typeof a === 'string' && typeof b === 'string' && a.slice(0, 10) === b.slice(0, 10);
   }
 
+  function fineDayId(occurrence) {
+    if (!occurrence || !occurrence.fine || !validIso(occurrence.fine.startAt)) return null;
+    return occurrence.fine.startAt.slice(5, 7) + occurrence.fine.startAt.slice(8, 10);
+  }
+
+  function scheduleDayId(occurrence) {
+    return fineDayId(occurrence) || (occurrence && typeof occurrence.day === 'string' ? occurrence.day : null);
+  }
+
   function normalizeFineOccurrence(occurrence, trip) {
     var out = clone(occurrence || {});
     out.id = typeof out.id === 'string' ? out.id : '';
@@ -117,7 +126,7 @@
 
   function buildDaySchedule(version, day, trip) {
     var all = (version && Array.isArray(version.plan) ? version.plan : [])
-      .filter(function (item) { return item && item.day === day; })
+      .filter(function (item) { return item && scheduleDayId(item) === day; })
       .map(function (item) { return normalizeFineOccurrence(item, trip || {}); });
     var items = [];
     var unscheduled = [];
@@ -720,7 +729,7 @@
     var dayIndexes = [];
     var dayItems = [];
     out.plan.forEach(function (item, index) {
-      if (item.day === transaction.day) {
+      if (scheduleDayId(item) === transaction.day) {
         dayIndexes.push(index);
         dayItems.push(item);
       }
@@ -754,6 +763,8 @@
 
   var api = {
     normalizeFineOccurrence: normalizeFineOccurrence,
+    fineDayId: fineDayId,
+    scheduleDayId: scheduleDayId,
     occurrenceInterval: occurrenceInterval,
     sortFineOccurrences: sortFineOccurrences,
     buildDaySchedule: buildDaySchedule,

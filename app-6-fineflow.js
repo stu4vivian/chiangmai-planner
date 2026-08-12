@@ -103,6 +103,43 @@
     return match ? match[1] : '';
   }
 
+  function dateFromIso(value) {
+    var match = typeof value === 'string' && value.match(/^(\d{4}-\d{2}-\d{2})T/);
+    return match ? match[1] : '';
+  }
+
+  function fineDate(item) {
+    return dateFromIso(item && item.fine && item.fine.startAt) || dayDate(item && item.day);
+  }
+
+  function fineDayId(item) {
+    return dayIdForDate(fineDate(item));
+  }
+
+  function coarseSlotLabel(slot) {
+    if (typeof slotObj === 'function') {
+      var meta = slotObj(slot);
+      return [meta.ctx, meta.label].filter(Boolean).join(' ') || slot;
+    }
+    return slot || '';
+  }
+
+  function coarseDayOptions(selected) {
+    return (typeof DAYS !== 'undefined' ? DAYS : []).map(function (day) {
+      return '<option value="' + h(day.id) + '"' + (day.id === selected ? ' selected' : '') + '>' + h(day.label + '（' + day.wd + '）') + '</option>';
+    }).join('');
+  }
+
+  function coarseSlotOptions(selected) {
+    return (typeof SLOTS !== 'undefined' ? SLOTS : []).filter(function (slot) { return slot.kind !== 'stay'; }).map(function (slot) {
+      return '<option value="' + h(slot.key) + '"' + (slot.key === selected ? ' selected' : '') + '>' + h(coarseSlotLabel(slot.key)) + '</option>';
+    }).join('');
+  }
+
+  function suggestedCoarsePosition(date, time) {
+    return { day: dayIdForDate(date), slot: slotFromTime(time) };
+  }
+
   function minuteDuration(item) {
     if (!item || !item.fine) return null;
     var duration = Math.round((Date.parse(item.fine.endAt) - Date.parse(item.fine.startAt)) / 60000);
@@ -183,13 +220,13 @@
       try { return api.buildDaySchedule(version, dayId, typeof TRIP !== 'undefined' ? TRIP : {}); }
       catch (_) {}
     }
-    return (version.plan || []).filter(function (item) { return item.day === dayId; });
+    return (version.plan || []).filter(function (item) { return fineDayId(item) === dayId; });
   }
 
   function scheduleParts(schedule, dayId, version) {
     var raw = Array.isArray(schedule) ? schedule :
       (schedule && (schedule.occurrences || schedule.items || schedule.schedule || schedule.all)) ||
-      (version.plan || []).filter(function (item) { return item.day === dayId; });
+      (version.plan || []).filter(function (item) { return fineDayId(item) === dayId; });
     var all = raw.map(occurrenceOf).filter(Boolean);
     var precise = fineSort(all.filter(function (item) { return item.fine && item.fine.startAt && item.fine.endAt; }));
     var unplanned = all.filter(function (item) { return !item.fine; });
@@ -218,7 +255,7 @@
     var version = activeVersion();
     if (!version) throw new Error('找不到目前使用的行程版本');
     var known = typeof DAYS !== 'undefined' && Array.isArray(DAYS) ? DAYS.map(function (day) { return day.id; }) : [];
-    (version.plan || []).forEach(function (item) { if (item.day && known.indexOf(item.day) < 0) known.push(item.day); });
+    (version.plan || []).forEach(function (item) { var id = fineDayId(item); if (id && known.indexOf(id) < 0) known.push(id); });
     var days = known.map(function (dayId) {
       var parts = scheduleParts(buildSchedule(version, dayId), dayId, version);
       var todos = parts.precise.concat(parts.unplanned).reduce(function (sum, item) { return sum + (Array.isArray(item.todos) ? item.todos.length : 0); }, 0);
@@ -523,20 +560,20 @@
 
   function editorRequest(editor) {
     var item = findOccurrence(editor.id);
-    var date = dayDate(item.day);
+    var date = fineDate(item);
     var endDate = date;
     if (editor.end <= editor.start) endDate = addDays(date, 1);
     var startAt = zonedIso(date, editor.start);
     var endAt = zonedIso(endDate, editor.end);
     return {
       versionId: activeVersion() && activeVersion().id,
-      occurrenceId: item.id, itemId: item.id, day: item.day,
+      occurrenceId: item.id, itemId: item.id, day: fineDayId(item),
       startAt: startAt, endAt: endAt, newStartAt: startAt, newEndAt: endAt,
       fixedMarker: !!editor.fixedMarker,
       compressibility: editor.compressibility,
       minDurationMin: Math.max(0, +editor.minDurationMin || 0),
       targetOccurrenceId: editor.targetId || null, swapWithOccurrenceId: editor.targetId || null,
-      context: contextForDay(item.day),
+      context: contextForDay(fineDayId(item)),
       rules: { maxContinuousGapMin: 90 }
     };
   }
@@ -555,13 +592,12 @@
       minDurationMin: Math.min(duration, request.minDurationMin)
     });
     after.startTime = timeFromIso(request.startAt);
-    after.slot = slotFromTime(after.startTime);
-    var base = schedule && !Array.isArray(schedule) ? copy(schedule) : { day: item.day, timeZone: typeof TRIP !== 'undefined' && TRIP.timeZone, items: [], unscheduled: [] };
+    var base = schedule && !Array.isArray(schedule) ? copy(schedule) : { day: fineDayId(item), timeZone: typeof TRIP !== 'undefined' && TRIP.timeZone, items: [], unscheduled: [] };
     base.items = Array.isArray(base.items) ? base.items : [];
     base.unscheduled = Array.isArray(base.unscheduled) ? base.unscheduled : [];
     var afterItems = base.items.filter(function (entry) { return entry.id !== item.id; }).concat([after]);
     var afterSchedule = {
-      day: item.day, timeZone: base.timeZone,
+      day: fineDayId(item), timeZone: base.timeZone,
       items: fineSort(afterItems),
       unscheduled: base.unscheduled.filter(function (entry) { return entry.id !== item.id; })
     };
@@ -579,7 +615,7 @@
     });
     return {
       id: 'ff_fallback_' + Date.now(), operation: operation,
-      versionId: activeVersion().id, day: item.day,
+      versionId: activeVersion().id, day: fineDayId(item),
       baseFingerprint: typeof api.baseFingerprint === 'function' ? api.baseFingerprint(base) : JSON.stringify(base),
       mutations: [{ occurrenceId: item.id, before: copy(item), after: after, reason: '調整時間' }],
       issues: issues, summary: { moved: 1, shortened: 0, unresolved: issues.filter(function (issue) { return issue.status !== 'resolved'; }).length },
@@ -595,7 +631,7 @@
     editor.previewing = true;
     editor.error = '';
     try {
-      var api = ffApi(), request = editorRequest(editor), schedule = scheduleFor(item.day), transaction;
+      var api = ffApi(), request = editorRequest(editor), schedule = scheduleFor(fineDayId(item)), transaction;
       if (editor.firstSchedule) {
         transaction = fallbackPreview(item, request, 'single', schedule);
       } else if (editor.mode === 'swap') {
@@ -629,7 +665,8 @@
   function scheduleCandidates(editor) {
     var item = findOccurrence(editor.id);
     if (!item) return [];
-    var parts = scheduleParts(scheduleFor(item.day), item.day, activeVersion());
+    var itemDay = fineDayId(item);
+    var parts = scheduleParts(scheduleFor(itemDay), itemDay, activeVersion());
     return fineSort(parts.precise.concat(parts.unplanned)).filter(function (candidate) { return candidate.id !== item.id; });
   }
 
@@ -711,6 +748,11 @@
         (issue.type === 'conflict' || issue.type === 'travel_shortage' || issue.type === 'anchor_violation' || issue.type === 'day_overflow');
     });
     var candidates = scheduleCandidates(editor);
+    var coarseSuggestion = suggestedCoarsePosition(fineDate(item), editor.start);
+    var coarseChanged = editor.coarseVisible !== !!(item.day && item.slot) ||
+      (editor.coarseVisible && (editor.coarseDay !== item.day || editor.coarseSlot !== item.slot));
+    var coarseControls = '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-coarse' + (editor.coarseVisible ? ' checked' : '') + '><span><b>顯示於粗流</b><small>粗流位置獨立，不會跟著細流拖動</small></span></label>' +
+      '<div class="ff-coarse-fields"' + (editor.coarseVisible ? '' : ' hidden') + '><div class="ff-coarse-suggestion"><span>依細流建議：' + h((dayMeta(coarseSuggestion.day).label || coarseSuggestion.day) + '・' + coarseSlotLabel(coarseSuggestion.slot)) + '</span><button type="button" data-action="ff-coarse-suggest">套用建議</button></div><div class="ff-rule-grid"><label class="ff-field"><span>粗流日期</span><select data-ff-coarse-day>' + coarseDayOptions(editor.coarseDay) + '</select></label><label class="ff-field"><span>粗流時段</span><select data-ff-coarse-slot>' + coarseSlotOptions(editor.coarseSlot) + '</select></label></div></div></section>';
     var editorFields = editor.mode === 'swap' ?
       '<label class="ff-field"><span>交換對象</span><select data-ff-target aria-label="選擇交換行程"><option value="">請選一項</option>' + candidates.map(function (candidate) {
         var time = candidate.fine ? timeFromIso(candidate.fine.startAt) : '未排';
@@ -739,8 +781,8 @@
       conflictChoices + '<div class="ff-modes ff-legacy-modes" hidden role="tablist" aria-label="進階調整方式">' + [['single', '只改這項'], ['ripple', '連動後面'], ['swap', '交換行程']].map(function (mode) {
         var unavailable = editor.firstSchedule && mode[0] !== 'single';
         return '<button type="button" role="tab" aria-selected="' + (editor.mode === mode[0]) + '" class="' + (editor.mode === mode[0] ? 'active' : '') + '" data-action="ff-mode" data-mode="' + mode[0] + '"' + (unavailable ? ' disabled title="先設定這項的時間"' : '') + '>' + mode[1] + '</button>';
-      }).join('') + '</div><div class="ff-sheet-scroll"><div class="ff-current"><span class="ff-kicker">正在調整</span><b>' + h(occurrenceTitle(item)) + '</b><small>' + h(kindLabel(item.scheduleKind)) + (item.transport && item.transport.routeLabel ? '・' + h(item.transport.routeLabel) : '') + '</small></div>' + editorFields + rules + notice + preview + '</div>' +
-      '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || !mutations.length || blocking ? ' disabled' : '') + '>套用 ' + mutations.length + ' 項變更</button></div></div>';
+      }).join('') + '</div><div class="ff-sheet-scroll"><div class="ff-current"><span class="ff-kicker">正在調整</span><b>' + h(occurrenceTitle(item)) + '</b><small>' + h(kindLabel(item.scheduleKind)) + (item.transport && item.transport.routeLabel ? '・' + h(item.transport.routeLabel) : '') + '</small></div>' + editorFields + coarseControls + rules + notice + preview + '</div>' +
+      '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || (!mutations.length && !coarseChanged) || blocking ? ' disabled' : '') + '>套用 ' + (mutations.length + (coarseChanged ? 1 : 0)) + ' 項變更</button></div></div>';
     openSheet(html, function () { renderEditor(); }, 'fineflow-editor');
     setTimeout(function () { var focus = sh.querySelector('[data-ff-start], [data-ff-target]'); if (focus) focus.focus(); }, 0);
   }
@@ -757,6 +799,9 @@
       fixedMarker: !!(item.fine && item.fine.fixedMarker),
       compressibility: item.fine && item.fine.compressibility || 'none',
       minDurationMin: item.fine && item.fine.minDurationMin || duration,
+      coarseVisible: !!(item.day && item.slot),
+      coarseDay: item.day || fineDayId(item),
+      coarseSlot: item.slot || slotFromTime(start),
       targetId: '', transaction: null, error: '', notice: '', previewing: false, rulesOpen: false
     };
     if (uiStore) {
@@ -785,7 +830,7 @@
     try {
       if (transaction.manualFirstSchedule && typeof api.baseFingerprint === 'function') {
         var manualItem = findOccurrence(editor.id);
-        var currentDayFingerprint = manualItem && api.baseFingerprint(buildSchedule(version, manualItem.day));
+        var currentDayFingerprint = manualItem && api.baseFingerprint(buildSchedule(version, fineDayId(manualItem)));
         if (!manualItem || currentDayFingerprint !== transaction.baseFingerprint) {
           editor.notice = '行程剛被更新，以下已改用最新資料重新計算。';
           runPreview();
@@ -794,7 +839,7 @@
       }
       if (editor.pointerMode && uiStore && typeof api.baseFingerprint === 'function') {
         var activeItem = findOccurrence(editor.id);
-        var confirmation = uiStore.dispatch({ type: 'CONFIRM', activeVersionId: version.id, currentFingerprint: api.baseFingerprint(buildSchedule(version, activeItem.day)) });
+        var confirmation = uiStore.dispatch({ type: 'CONFIRM', activeVersionId: version.id, currentFingerprint: api.baseFingerprint(buildSchedule(version, fineDayId(activeItem))) });
         var applyCommand = confirmation.effects.some(function (effect) { return effect.command === 'apply-transaction'; });
         if (!applyCommand) {
           var failedEffect = confirmation.effects[0] || {};
@@ -812,12 +857,11 @@
           if (index >= 0 && mutation.after) next.plan[index] = copy(mutation.after);
         });
       }
-      next.plan.forEach(function (item) {
-        var preciseStart = timeFromIso(item && item.fine && item.fine.startAt);
-        if (!preciseStart) return;
-        item.startTime = preciseStart;
-        item.slot = slotFromTime(preciseStart);
-      });
+      var editedItem = next.plan.find(function (item) { return item.id === editor.id; });
+      if (editedItem) {
+        editedItem.day = editor.coarseVisible ? editor.coarseDay : null;
+        editedItem.slot = editor.coarseVisible ? editor.coarseSlot : null;
+      }
       var inverse = typeof api.invertTransaction === 'function' && !transaction.manualFirstSchedule ? api.invertTransaction(transaction, next) : null;
       replaceVersionInPlace(version, next);
       if (typeof syncActive === 'function') syncActive();
@@ -847,11 +891,11 @@
   function openTodos(dayId) {
     var entries = [];
     activePlan().forEach(function (item) {
-      if (dayId && item.day !== dayId) return;
+      if (dayId && fineDayId(item) !== dayId) return;
       (item.todos || []).forEach(function (todo) { entries.push({ item: item, todo: todo }); });
     });
     var body = entries.length ? entries.map(function (entry) {
-      var meta = dayMeta(entry.item.day);
+      var meta = dayMeta(fineDayId(entry.item));
       return '<button type="button" class="ff-todo-row' + (entry.todo.done ? ' done' : '') + '" data-action="ff-todo-toggle" data-eid="' + h(entry.item.id) + '" data-todo="' + h(entry.todo.id) + '" aria-pressed="' + entry.todo.done + '">' +
         '<span class="ff-check">' + (entry.todo.done ? '✓' : '') + '</span><span><b>' + h(entry.todo.text) + '</b><small>' + h(meta.label + '・' + (timeFromIso(entry.item.fine && entry.item.fine.startAt) || '未排時間') + '・' + occurrenceTitle(entry.item)) + '</small></span></button>';
     }).join('') : '<div class="ff-sheet-empty">目前沒有待辦</div>';
@@ -888,7 +932,7 @@
     var version = activeVersion(), before = copy(version);
     var raw = {
       id: typeof uid === 'function' ? uid() : 'ff_' + Date.now(), placeId: null,
-      custom: { title: title, kind: 'life' }, day: dayId, slot: slotFromTime(start), startTime: start,
+      custom: { title: title, kind: 'life' }, day: null, slot: null, startTime: start,
       fine: { startAt: startAt, endAt: endAt, originalDurationMin: duration, minDurationMin: duration,
         compressibility: 'none', fixedMarker: !!(document.getElementById('ff_custom_fixed') || {}).checked,
         timeCommitment: 'flexible', autoMovePolicy: 'manual', manualOrder: activePlan().length },
@@ -995,6 +1039,14 @@
     return '<label class="ff-field"><span>日期</span><input type="date" data-ff-create-date value="' + h(date) + '" min="' + h(minDate) + '" max="' + h(maxDate) + '"></label><div class="ff-time-fields"><label class="ff-field"><span>開始</span><input type="time" data-ff-create-start value="' + h(start) + '"></label><span aria-hidden="true">→</span><label class="ff-field"><span>結束</span><input type="time" data-ff-create-end value="' + h(end) + '"></label></div>';
   }
 
+  function creationCoarseFields(draft) {
+    var suggested = suggestedCoarsePosition(draft.date || calendarAnchor(), draft.start || '09:00');
+    if (typeof draft.coarseVisible !== 'boolean') draft.coarseVisible = false;
+    draft.coarseDay = draft.coarseDay || suggested.day;
+    draft.coarseSlot = draft.coarseSlot || suggested.slot;
+    return '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-create-coarse' + (draft.coarseVisible ? ' checked' : '') + '><span><b>顯示於粗流</b><small>預設只排細流；需要時再加入旅程大方向</small></span></label><div class="ff-coarse-fields"' + (draft.coarseVisible ? '' : ' hidden') + '><div class="ff-coarse-suggestion"><span>依細流建議：' + h((dayMeta(suggested.day).label || suggested.day) + '・' + coarseSlotLabel(suggested.slot)) + '</span><button type="button" data-action="ff-create-coarse-suggest">套用建議</button></div><div class="ff-rule-grid"><label class="ff-field"><span>粗流日期</span><select data-ff-create-coarse-day>' + coarseDayOptions(draft.coarseDay) + '</select></label><label class="ff-field"><span>粗流時段</span><select data-ff-create-coarse-slot>' + coarseSlotOptions(draft.coarseSlot) + '</select></label></div></div></section>';
+  }
+
   function ensureCreateTimingDraft(title) {
     var draft = state.createDraft || sourceDraft({});
     draft.date = draft.date || calendarAnchor();
@@ -1012,7 +1064,7 @@
     var draft = ensureCreateTimingDraft('新增行程');
     var categories = typeof categoriesList === 'function' ? categoriesList() : [];
     var options = categories.map(function (category) { return '<option value="' + h(category.key) + '">' + h((category.icon || '') + ' ' + category.label) + '</option>'; }).join('');
-    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-create-title"><div class="ff-sheet-head"><span class="ff-kicker">自訂行程</span><h3 id="ff-create-title">新增自訂行程</h3><p>卡片會使用所選類別的同色系淺色。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>行程名稱</span><input data-ff-create-title maxlength="80" placeholder="例如：起床、整理行李"></label><label class="ff-field"><span>類別</span><select data-ff-create-category>' + options + '</select></label><label class="ff-field"><span>備註</span><textarea data-ff-create-notes maxlength="500" placeholder="選填"></textarea></label>' + creationTimingFields(draft) + '<label class="ff-fixed-check"><input type="checkbox" data-ff-create-fixed><span>標記為固定行程</span></label><div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="custom">新增行程</button></div></div>', function () { openCustomCreate(); }, 'fineflow-create-custom');
+    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-create-title"><div class="ff-sheet-head"><span class="ff-kicker">自訂行程</span><h3 id="ff-create-title">新增自訂行程</h3><p>卡片會使用所選類別的同色系淺色。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>行程名稱</span><input data-ff-create-title maxlength="80" placeholder="例如：起床、整理行李"></label><label class="ff-field"><span>類別</span><select data-ff-create-category>' + options + '</select></label><label class="ff-field"><span>備註</span><textarea data-ff-create-notes maxlength="500" placeholder="選填"></textarea></label>' + creationTimingFields(draft) + creationCoarseFields(draft) + '<label class="ff-fixed-check"><input type="checkbox" data-ff-create-fixed><span>標記為固定行程</span></label><div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="custom">新增行程</button></div></div>', function () { openCustomCreate(); }, 'fineflow-create-custom');
   }
 
   function openPlaceCreate() {
@@ -1027,19 +1079,20 @@
     if (!place) { if (typeof toast === 'function') toast('找不到這張行程卡片'); return; }
     ensureCreateTimingDraft(place.name);
     state.createDraft.placeId = place.id;
-    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-place-time-title"><div class="ff-sheet-head"><span class="ff-kicker">行程卡片</span><h3 id="ff-place-time-title">' + h(place.name) + '</h3></div><div class="ff-sheet-scroll">' + creationTimingFields(state.createDraft) + '<label class="ff-fixed-check"><input type="checkbox" data-ff-create-fixed><span>標記為固定行程</span></label><div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="place-card">新增行程</button></div></div>', function () { openPlaceTiming(placeId); }, 'fineflow-create-place-time');
+    var cardMap = safeMapsUrl(place.mapsUrl || (typeof gmaps === 'function' ? gmaps(place) : ''));
+    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-place-time-title"><div class="ff-sheet-head"><span class="ff-kicker">行程卡片</span><h3 id="ff-place-time-title">' + h(place.name) + '</h3><p>' + (cardMap ? 'Maps 連結會由這張行程卡片自動帶入，不必重貼。' : '這張行程卡片目前沒有 Maps 連結。') + '</p></div><div class="ff-sheet-scroll">' + (cardMap ? '<a class="ff-card-map-preview" href="' + h(cardMap) + '" target="_blank" rel="noopener noreferrer">⌖ 查看卡片的 Maps 連結</a>' : '') + creationTimingFields(state.createDraft) + creationCoarseFields(state.createDraft) + '<label class="ff-fixed-check"><input type="checkbox" data-ff-create-fixed><span>標記為固定行程</span></label><div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="place-card">新增行程</button></div></div>', function () { openPlaceTiming(placeId); }, 'fineflow-create-place-time');
   }
 
   function openMapsCreate() {
     var draft = ensureCreateTimingDraft('新增 Maps 行程');
     var categories = typeof categoriesList === 'function' ? categoriesList() : [];
     var options = categories.map(function (category) { return '<option value="' + h(category.key) + '">' + h((category.icon || '') + ' ' + category.label) + '</option>'; }).join('');
-    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-maps-title"><div class="ff-sheet-head"><span class="ff-kicker">Google Maps</span><h3 id="ff-maps-title">貼 Maps 連結</h3><p>短連結也會保留；若連結沒有座標，交通資訊會標示待補。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>Maps 連結</span><input type="url" data-ff-create-maps placeholder="https://maps.app.goo.gl/…"></label><label class="ff-field"><span>行程名稱</span><input data-ff-create-title maxlength="80" placeholder="店名或地點名稱"></label><label class="ff-field"><span>類別</span><select data-ff-create-category>' + options + '</select></label><label class="ff-field"><span>備註</span><textarea data-ff-create-notes maxlength="500" placeholder="選填"></textarea></label>' + creationTimingFields(draft) + '<div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="maps">新增行程</button></div></div>', function () { openMapsCreate(); }, 'fineflow-create-maps');
+    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-maps-title"><div class="ff-sheet-head"><span class="ff-kicker">Google Maps</span><h3 id="ff-maps-title">建立新的行程卡片</h3><p>這個入口會先建立卡片；之後排這張卡時，Maps 連結都會自動帶入。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>Maps 連結</span><input type="url" data-ff-create-maps placeholder="https://maps.app.goo.gl/…"></label><label class="ff-field"><span>行程名稱</span><input data-ff-create-title maxlength="80" placeholder="店名或地點名稱"></label><label class="ff-field"><span>類別</span><select data-ff-create-category>' + options + '</select></label><label class="ff-field"><span>備註</span><textarea data-ff-create-notes maxlength="500" placeholder="選填"></textarea></label>' + creationTimingFields(draft) + creationCoarseFields(draft) + '<div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="maps">新增行程</button></div></div>', function () { openMapsCreate(); }, 'fineflow-create-maps');
   }
 
   function creationValues() {
     function value(selector) { var el = sh.querySelector(selector); return el ? String(el.value || '').trim() : ''; }
-    return { title: value('[data-ff-create-title]'), date: value('[data-ff-create-date]'), start: value('[data-ff-create-start]'), end: value('[data-ff-create-end]'), mapsUrl: value('[data-ff-create-maps]'), category: value('[data-ff-create-category]'), notes: value('[data-ff-create-notes]'), fixed: !!(sh.querySelector('[data-ff-create-fixed]') || {}).checked };
+    return { title: value('[data-ff-create-title]'), date: value('[data-ff-create-date]'), start: value('[data-ff-create-start]'), end: value('[data-ff-create-end]'), mapsUrl: value('[data-ff-create-maps]'), category: value('[data-ff-create-category]'), notes: value('[data-ff-create-notes]'), fixed: !!(sh.querySelector('[data-ff-create-fixed]') || {}).checked, coarseVisible: !!(sh.querySelector('[data-ff-create-coarse]') || {}).checked, coarseDay: value('[data-ff-create-coarse-day]'), coarseSlot: value('[data-ff-create-coarse-slot]') };
   }
 
   function showCreationError(message) {
@@ -1079,10 +1132,10 @@
       id: typeof uid === 'function' ? uid() : 'ff_' + Date.now(),
       placeId: place ? place.id : null,
       custom: kind === 'custom' ? { title: values.title, kind: 'life' } : null,
-      day: dayIdForDate(values.date), slot: slotFromTime(values.start), startTime: values.start,
+      day: values.coarseVisible ? values.coarseDay : null, slot: values.coarseVisible ? values.coarseSlot : null, startTime: values.start,
       category: kind === 'custom' ? (values.category || '其他') : (place && place.type || values.category || '其他'),
       notes: values.notes || '',
-      mapLinks: kind === 'maps' ? [{ label: values.title, url: maps }] : [],
+      mapLinks: [],
       fine: { startAt: zonedIso(values.date, values.start), endAt: zonedIso(values.date, values.end), originalDurationMin: duration, minDurationMin: duration, compressibility: 'none', fixedMarker: values.fixed, intentionalGapBefore: false, acceptedConflictWith: [], timeCommitment: values.fixed ? 'external' : 'flexible', autoMovePolicy: values.fixed ? 'manual' : 'auto', manualOrder: activePlan().length },
       scheduleKind: kind === 'custom' ? 'custom' : 'place', transport: null, todos: [], seq: activePlan().length
     };
@@ -1114,14 +1167,14 @@
 
   function mapsForOccurrence(item) {
     var links = [];
+    var place = item && item.placeId && typeof getPlace === 'function' ? getPlace(item.placeId) : null;
+    var placeUrl = place ? safeMapsUrl(place.mapsUrl || (typeof gmaps === 'function' ? gmaps(place) : '')) : '';
+    if (placeUrl) links.push({ label: place.name || '在 Google Maps 開啟', url: placeUrl, source: 'place' });
     (item && Array.isArray(item.mapLinks) ? item.mapLinks : []).forEach(function (entry) {
       var url = safeMapsUrl(typeof entry === 'string' ? entry : entry && entry.url);
       if (!url || links.some(function (link) { return link.url === url; })) return;
-      links.push({ label: typeof entry === 'object' && entry.label || '在 Google Maps 開啟', url: url });
+      links.push({ label: '本次行程：' + (typeof entry === 'object' && entry.label || '附加導航點'), url: url, source: 'occurrence' });
     });
-    var place = item && item.placeId && typeof getPlace === 'function' ? getPlace(item.placeId) : null;
-    var placeUrl = place ? safeMapsUrl(place.mapsUrl || (typeof gmaps === 'function' ? gmaps(place) : '')) : '';
-    if (placeUrl && !links.some(function (link) { return link.url === placeUrl; })) links.push({ label: place.name || '在 Google Maps 開啟', url: placeUrl });
     return links;
   }
 
@@ -1260,6 +1313,24 @@
     if (action === 'ff-unscheduled') { openUnscheduled(); return; }
     if (action === 'ff-unscheduled-edit') { openEditor(target.dataset.eid); return; }
     if (action === 'ff-import-apply') { applyImportPreview(); return; }
+    if (action === 'ff-create-coarse-suggest' && state.createDraft) {
+      var createSuggestion = suggestedCoarsePosition(state.createDraft.date, state.createDraft.start);
+      state.createDraft.coarseDay = createSuggestion.day;
+      state.createDraft.coarseSlot = createSuggestion.slot;
+      var createDay = sh.querySelector('[data-ff-create-coarse-day]');
+      var createSlot = sh.querySelector('[data-ff-create-coarse-slot]');
+      if (createDay) createDay.value = createSuggestion.day;
+      if (createSlot) createSlot.value = createSuggestion.slot;
+      return;
+    }
+    if (action === 'ff-coarse-suggest' && state.editor) {
+      var edited = findOccurrence(state.editor.id);
+      var editorSuggestion = suggestedCoarsePosition(fineDate(edited), state.editor.start);
+      state.editor.coarseDay = editorSuggestion.day;
+      state.editor.coarseSlot = editorSuggestion.slot;
+      renderEditor();
+      return;
+    }
     if (action === 'ff-conflict-single') { acceptPreviewConflicts(); return; }
     if (action === 'ff-conflict-ripple' && state.editor) { if (uiStore) uiStore.dispatch({ type: 'CONFLICT_RIPPLE' }); state.editor.mode = 'ripple'; state.editor.transaction = null; runPreview(); return; }
     if (action === 'close' && sh && sh.querySelector('.ff-sheet')) {
@@ -1297,7 +1368,8 @@
       var item = findOccurrence(target.dataset.eid), todo = item && (item.todos || []).find(function (entry) { return entry.id === target.dataset.todo; });
       if (!todo) return;
       toggleOccurrenceTodo(item.id, todo.id, false);
-      openTodos(item.day && state.day === item.day ? item.day : null);
+      var todoDay = fineDayId(item);
+      openTodos(todoDay && state.day === todoDay ? todoDay : null);
       return;
     }
     if (action === 'ff-mode' && state.editor) {
@@ -1449,7 +1521,7 @@
       if (endInput) endInput.value = state.editor.end;
     } else if (event.target.matches('[data-ff-end]')) {
       state.editor.end = event.target.value;
-      var item = findOccurrence(state.editor.id), date = dayDate(item.day), endDate = state.editor.end <= state.editor.start ? addDays(date, 1) : date;
+      var item = findOccurrence(state.editor.id), date = fineDate(item), endDate = state.editor.end <= state.editor.start ? addDays(date, 1) : date;
       state.editor.durationMin = Math.round((Date.parse(zonedIso(endDate, state.editor.end)) - Date.parse(zonedIso(date, state.editor.start))) / 60000);
       if (state.editor.minDurationMin > state.editor.durationMin) state.editor.minDurationMin = state.editor.durationMin;
     } else if (event.target.matches('[data-ff-min]')) {
@@ -1463,10 +1535,26 @@
   });
 
   document.addEventListener('change', function (event) {
+    if (state.createDraft && event.target.matches('[data-ff-create-coarse], [data-ff-create-coarse-day], [data-ff-create-coarse-slot]')) {
+      if (event.target.matches('[data-ff-create-coarse]')) {
+        state.createDraft.coarseVisible = event.target.checked;
+        var createFields = sh.querySelector('.ff-coarse-fields');
+        if (createFields) createFields.hidden = !event.target.checked;
+      } else if (event.target.matches('[data-ff-create-coarse-day]')) state.createDraft.coarseDay = event.target.value;
+      else state.createDraft.coarseSlot = event.target.value;
+      return;
+    }
     if (!state.editor) return;
     if (event.target.matches('[data-ff-target]')) state.editor.targetId = event.target.value;
     else if (event.target.matches('[data-ff-fixed]')) { state.editor.fixedMarker = event.target.checked; state.editor.rulesOpen = true; }
     else if (event.target.matches('[data-ff-compress]')) { state.editor.compressibility = event.target.value; state.editor.rulesOpen = true; }
+    else if (event.target.matches('[data-ff-coarse]')) {
+      state.editor.coarseVisible = event.target.checked;
+      renderEditor();
+      return;
+    }
+    else if (event.target.matches('[data-ff-coarse-day]')) { state.editor.coarseDay = event.target.value; renderEditor(); return; }
+    else if (event.target.matches('[data-ff-coarse-slot]')) { state.editor.coarseSlot = event.target.value; renderEditor(); return; }
     else return;
     state.editor.notice = '';
     runPreview();

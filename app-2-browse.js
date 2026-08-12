@@ -7,15 +7,13 @@ function armPlace(placeId){ if(!getPlace(placeId)) return; if(armed&&!armed.move
 function armMove(eid){ const e=plan.find(x=>x.id===eid); if(!e) return; armed={placeId:e.placeId, moveEid:eid}; enterArm(); }
 function moveOccurrenceToCoarseSlot(e,day,slot){
   if(!e) return null;
-  const before={day:e.day,slot:e.slot,startTime:e.startTime,fine:e.fine?JSON.parse(JSON.stringify(e.fine)):null};
+  const before={day:e.day,slot:e.slot};
   e.day=day; e.slot=slot;
-  if(e.fine){ e.fine=null; delete e.startTime; }
   return before;
 }
 function restoreOccurrencePosition(e,before){
   if(!e||!before) return;
-  e.day=before.day; e.slot=before.slot; e.fine=before.fine?JSON.parse(JSON.stringify(before.fine)):null;
-  if(before.startTime) e.startTime=before.startTime; else delete e.startTime;
+  e.day=before.day; e.slot=before.slot;
 }
 function enterArm(){ closeSheet(); switchTab('flow'); renderArm(); renderRibbon(); }   // 進入待命：關浮層、跳總覽、亮格＋升起橫幅
 function disarm(){ armed=null; renderArm(); renderRibbon(); }                            // 離開待命：收橫幅、復原亮格
@@ -41,8 +39,8 @@ function dropInto(day, slot){   // 待命中點亮起的真實格＝放入/移�
   const so=slotObj(slot), lbl=((DAYS.find(x=>x.id===day)||{}).label||day)+' '+(so.ctx||so.label);   // 行程格用 ctx（上午/晚）比 label（行程）清楚
   if(armed.moveEid){
     const eid=armed.moveEid, e=plan.find(x=>x.id===eid); if(!e){ disarm(); return; }
-    const before=moveOccurrenceToCoarseSlot(e,day,slot); closeSheet(); disarm(); afterChange();   // 粗流只表達時段；原有精確時間失效後回細流「尚未排時間」，避免同筆資料兩套時間互相矛盾
-    toast('已移到 '+lbl+(before.fine?'；請到細流補精確時間':''), {undo:()=>{ const x=plan.find(y=>y.id===eid); if(x) restoreOccurrencePosition(x,before); afterChange(); }});
+    const before=moveOccurrenceToCoarseSlot(e,day,slot); closeSheet(); disarm(); afterChange();   // 粗流位置與細流精確時間各自保存；移動這一側不會粗暴改掉另一側
+    toast('已調整粗流位置；細流時間保持不變', {undo:()=>{ const x=plan.find(y=>y.id===eid); if(x) restoreOccurrencePosition(x,before); afterChange(); }});
   } else {
     const nid=uid(); plan.push({id:nid, placeId:armed.placeId, day, slot}); closeSheet(); disarm(); afterChange();
     toast('已排入 '+lbl, {undo:()=>{ const i=plan.findIndex(y=>y.id===nid); if(i>=0) plan.splice(i,1); afterChange(); }});
@@ -444,10 +442,9 @@ function dayRowsHTML(dayId){   // 共用：某天細排各 slot 列（細看 she
     let cells='';
     if(meta&&meta.tentative) cells+=`<div class="tentrow" data-action="cleartent" data-day="${dayId}" data-slot="${s.key}">⏳ 待定中（點一下取消）</div>`;
     if(entries.length){
-      // 已填→緊湊：占用列堆左欄＋右側小「＋」加第二項（密度，Vivian 回饋）。精確鐘點＝切片6，此處不放編輯鈕；已設時間唯讀顯示。
+      // 已填→緊湊：粗流只呈現大方向，不把細流精確鐘點混進來造成兩套時間看似矛盾。
       const items=entries.map(e=>{ const view=occurrenceView(e); if(!view) return '';
-        const tm=e.startTime?`<span class="dtime">🕑${esc(e.startTime)}</span>`:'';
-        return `<div class="ditem ${isMeal?'meal':''}" data-action="${view.action}" data-eid="${e.id}">${view.emoji} <span class="nm">${esc(view.name)}</span>${tm}</div>`;
+        return `<div class="ditem ${isMeal?'meal':''}" data-action="${view.action}" data-eid="${e.id}">${view.emoji} <span class="nm">${esc(view.name)}</span></div>`;
       }).join('');
       cells+=`<div class="fillrow${armed?' armdrop':''}" data-day="${dayId}" data-slot="${s.key}"><div class="fillitems">${items}</div><div class="dadd-mini" data-action="pickslot" data-day="${dayId}" data-slot="${s.key}" title="再加一項">＋</div></div>`;   // data-day/slot＝拖曳放到已填列也接得住（切片 B）
     } else {

@@ -902,6 +902,17 @@
   .sheet .ff-field input:focus,.sheet .ff-field select:focus{outline:0;border-color:var(--ink);}
   .ff-fixed-check{display:flex;align-items:center;gap:9px;min-height:42px;font-size:13px;color:var(--ink2);cursor:pointer;}
   .sheet .ff-fixed-check input{width:18px;height:18px;margin:0;accent-color:var(--ink);}
+  .ff-fixed-check>span{display:flex;flex-direction:column;gap:2px;min-width:0;}
+  .ff-fixed-check>span>b{font-size:13px;line-height:1.25;}
+  .ff-fixed-check>span>small{font-size:10px;line-height:1.35;color:var(--muted);font-weight:400;}
+  .ff-coarse-control{margin:2px 0 12px;padding:7px 10px 8px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);}
+  .ff-coarse-fields[hidden]{display:none;}
+  .ff-coarse-fields{padding:4px 0 0;}
+  .ff-coarse-fields .ff-rule-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+  .ff-coarse-fields .ff-field{margin-bottom:2px;}
+  .ff-coarse-suggestion{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px;padding-top:7px;border-top:.5px solid var(--line);font-size:10px;color:var(--muted);}
+  .ff-coarse-suggestion button{flex:none;border:0;border-radius:7px;padding:6px 8px;background:#fff;color:var(--ink2);font:700 10px var(--ff);cursor:pointer;box-shadow:var(--sh-1);}
+  .ff-card-map-preview{display:flex;align-items:center;min-height:40px;margin:0 0 11px;padding:8px 10px;border-radius:9px;background:#eef3fb;color:#315f9f;font-size:11px;font-weight:700;text-decoration:none;}
   .ff-preview-state{padding:18px 10px;border-radius:9px;background:var(--surface-2);color:var(--muted);font-size:12px;text-align:center;}
   .ff-preview-state.error{background:#f9e9e7;color:var(--danger);}
   .ff-preview-state.notice{margin:0 0 9px;background:#eef1f6;color:#4c5f7d;}
