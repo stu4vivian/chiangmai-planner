@@ -528,6 +528,7 @@
         '<span class="ff-cal-card-time">' + h(card.startLabel + '–' + card.endLabel) + '</span>' + note + todo +
         '<span class="ff-cal-card-flags">' + (card.fixed ? '<span title="固定">鎖</span>' : '') + (conflict ? '<span class="ff-cal-conflict" title="有衝突">!</span>' : '') + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
       '</div>' +
+      '<button type="button" class="ff-cal-drag-handle" data-action="ff-drag-card" data-eid="' + h(card.id) + '" aria-label="拖動調整時間"></button>' +
       '<button type="button" class="ff-cal-resize ff-cal-resize-start" data-action="ff-resize-start" data-eid="' + h(card.id) + '" aria-label="調整開始時間"></button>' +
       '<button type="button" class="ff-cal-resize ff-cal-resize-end" data-action="ff-resize-end" data-eid="' + h(card.id) + '" aria-label="調整結束時間"></button>' +
       '<span hidden data-action="ff-edit" data-eid="' + h(card.id) + '"></span>' +
@@ -1267,13 +1268,13 @@
     if (uiStore) uiStore.dispatch({ type: 'OPEN_DETAIL', occurrenceId: id, versionId: guard.versionId, baseFingerprint: guard.baseFingerprint });
     var maps = mapsForOccurrence(item);
     var todos = (item.todos || []).map(function (todo) {
-      return '<button type="button" class="ff-todo-row' + (todo.done ? ' done' : '') + '" data-action="ff-detail-todo" data-eid="' + h(item.id) + '" data-todo="' + h(todo.id) + '" aria-pressed="' + todo.done + '"><span class="ff-check">' + (todo.done ? '✓' : '') + '</span><span><b>' + h(todo.text) + '</b></span></button>';
+      return '<button type="button" class="ff-todo-row' + (todo.done ? ' done' : '') + '" data-action="ff-detail-todo" data-eid="' + h(item.id) + '" data-todo="' + h(todo.id) + '" aria-pressed="' + todo.done + '"><span class="ff-check" aria-hidden="true">' + (todo.done ? '✓' : '') + '</span><span class="ff-detail-todo-text">' + h(todo.text) + '</span></button>';
     }).join('');
     var note = noteForOccurrence(item);
-    openSheet('<div class="ff-sheet ff-detail-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-detail-title"><div class="ff-sheet-head"><span class="ff-kicker">行程詳情</span><h3 id="ff-detail-title">' + h(occurrenceTitle(item)) + '</h3><p>' + h(item.fine ? timeFromIso(item.fine.startAt) + '～' + timeFromIso(item.fine.endAt) : '尚未排時間') + (item.fine && item.fine.fixedMarker ? '・固定' : '') + '</p></div><div class="ff-sheet-scroll">' +
-      (maps.length ? maps.map(function (link) { return '<a class="ff-detail-maps" href="' + h(link.url) + '" target="_blank" rel="noopener noreferrer">' + h(link.label || '在 Google Maps 開啟') + '</a>'; }).join('') : '<p class="ff-detail-missing">沒有可用的 Maps 連結</p>') +
+    openSheet('<div class="ff-sheet ff-detail-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-detail-title"><div class="ff-sheet-head"><span class="ff-kicker">行程詳情</span><h3 id="ff-detail-title">' + h(occurrenceTitle(item)) + '</h3><p class="ff-detail-meta">' + h(item.fine ? timeFromIso(item.fine.startAt) + '～' + timeFromIso(item.fine.endAt) : '尚未排時間') + (item.fine && item.fine.fixedMarker ? '<span>固定</span>' : '') + '</p></div><div class="ff-sheet-scroll">' +
+      '<section class="ff-detail-section"><h4>Maps</h4><div class="ff-detail-maps-list">' + (maps.length ? maps.map(function (link) { return '<a class="ff-detail-maps" href="' + h(link.url) + '" target="_blank" rel="noopener noreferrer"><span>' + h(link.label || '在 Google Maps 開啟') + '</span><span aria-hidden="true">↗</span></a>'; }).join('') : '<p class="ff-detail-missing">沒有可用的 Maps 連結</p>') + '</div></section>' +
       (note ? '<section class="ff-detail-note"><h4>備註</h4><p>' + h(note) + '</p></section>' : '') +
-      '<section class="ff-detail-todos"><h4>待辦事項</h4>' + (todos || '<p class="ff-detail-missing">目前沒有待辦</p>') + '<div class="ff-todo-add"><input data-ff-detail-todo-text maxlength="120" placeholder="新增待辦"><button type="button" data-action="ff-detail-todo-add" data-eid="' + h(item.id) + '">新增</button></div></section></div><div class="ff-sheet-actions"><button type="button" data-action="close">關閉</button><button type="button" class="primary" data-action="ff-detail-edit" data-eid="' + h(item.id) + '">編輯時間</button></div></div>', function () { openOccurrenceDetail(id); }, 'fineflow-detail');
+      '<section class="ff-detail-todos"><h4>待辦事項</h4><div class="ff-detail-todo-list">' + (todos || '<p class="ff-detail-missing">目前沒有待辦</p>') + '</div><div class="ff-todo-add"><input data-ff-detail-todo-text maxlength="120" placeholder="新增待辦"><button type="button" data-action="ff-detail-todo-add" data-eid="' + h(item.id) + '">新增</button></div></section></div><div class="ff-sheet-actions"><button type="button" data-action="close">關閉</button><button type="button" class="primary" data-action="ff-detail-edit" data-eid="' + h(item.id) + '">編輯時間</button></div></div>', function () { openOccurrenceDetail(id); }, 'fineflow-detail');
   }
 
   function toggleOccurrenceTodo(itemId, todoId, reopen) {
@@ -1799,7 +1800,9 @@
       autoFrame: null,
       autoSpeed: 0
     };
-    if (pointerDraft.pointerType === 'touch') {
+    if (source.immediate && pointerDraft.pointerType === 'touch') {
+      activatePointerDraft(pointerDraft);
+    } else if (pointerDraft.pointerType === 'touch') {
       pointerDraft.timer = setTimeout(function () {
         if (pointerDraft && pointerDraft.pointerId === event.pointerId) activatePointerDraft(pointerDraft);
       }, 450);
@@ -1808,10 +1811,19 @@
 
   document.addEventListener('pointerdown', function (event) {
     if (event.button != null && event.button !== 0) return;
+    var dragHandle = event.target.closest('[data-action="ff-drag-card"]');
+    if (dragHandle) {
+      var dragItem = findOccurrence(dragHandle.dataset.eid);
+      if (dragItem && dragItem.fine) {
+        if ((event.pointerType || 'mouse') === 'touch') event.preventDefault();
+        armPointerDraft(event, 'move', { item: dragItem, card: dragHandle.closest('.ff-cal-card'), captureTarget: dragHandle, date: fineDate(dragItem), dayId: fineDayId(dragItem), immediate: true });
+      }
+      return;
+    }
     var resize = event.target.closest('[data-action="ff-resize-start"], [data-action="ff-resize-end"]');
     if (resize) {
       var resizeItem = findOccurrence(resize.dataset.eid);
-      if (resizeItem && resizeItem.fine) armPointerDraft(event, resize.dataset.action === 'ff-resize-start' ? 'start' : 'end', { item: resizeItem, card: resize.closest('.ff-cal-card'), captureTarget: resize, date: fineDate(resizeItem), dayId: fineDayId(resizeItem) });
+      if (resizeItem && resizeItem.fine) armPointerDraft(event, resize.dataset.action === 'ff-resize-start' ? 'start' : 'end', { item: resizeItem, card: resize.closest('.ff-cal-card'), captureTarget: resize, date: fineDate(resizeItem), dayId: fineDayId(resizeItem), immediate: true });
       return;
     }
     var cardMain = event.target.closest('.ff-cal-card-main[data-ff-drag="card"]');
