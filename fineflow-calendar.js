@@ -1,4 +1,4 @@
-// fineflow-calendar.js — 細流三日行事曆的純 projection／版面邏輯。無 DOM、無儲存。
+// fineflow-calendar.js — 細流多日行事曆的純 projection／版面邏輯。無 DOM、無儲存。
 // 瀏覽器當全域 CNXFineFlowCalendar、Node 當模組。
 (function (root) {
   'use strict';
@@ -56,8 +56,13 @@
   }
 
   function buildThreeDayWindow(anchorDate) {
-    if (!parseDateKey(anchorDate)) return [];
-    return [0, 1, 2].map(function (offset) { return addCalendarDays(anchorDate, offset); });
+    return buildDateWindow(anchorDate, 3);
+  }
+
+  function buildDateWindow(anchorDate, dayCount) {
+    var count = Math.floor(finiteNumber(dayCount, 0));
+    if (!parseDateKey(anchorDate) || count < 1) return [];
+    return Array.from({ length: count }, function (_, offset) { return addCalendarDays(anchorDate, offset); });
   }
 
   function parseIsoWallTime(value) {
@@ -209,8 +214,8 @@
     var source = parseHexColor(color) || parseHexColor(DEFAULT_COLOR);
     var white = { r: 255, g: 255, b: 255 };
     var black = { r: 0, g: 0, b: 0 };
-    var background = mix(source, white, 0.86);
-    var border = mix(source, white, 0.28);
+    var background = mix(source, white, 0.88);
+    var border = mix(source, white, 0.58);
     var text = source;
     for (var step = 0; step <= 10 && contrastRatio(text, background) < 4.5; step++) {
       text = mix(source, black, (step + 1) / 10);
@@ -240,6 +245,12 @@
     return found && found.color || DEFAULT_COLOR;
   }
 
+  function categoryIcon(trip, key) {
+    var categories = trip && Array.isArray(trip.categories) ? trip.categories : [];
+    var found = categories.find(function (item) { return item && item.key === key; });
+    return found && typeof found.icon === 'string' && found.icon ? found.icon : '📍';
+  }
+
   function todoSummary(todos) {
     var list = Array.isArray(todos) ? todos.map(function (todo) { return clone(todo); }) : [];
     var completed = list.filter(function (todo) { return todo && todo.done === true; }).length;
@@ -265,6 +276,7 @@
       place: clone(place),
       missingPlace: !!(occurrence && occurrence.placeId && !place),
       categoryKey: categoryKey,
+      categoryIcon: categoryIcon(trip, categoryKey),
       categoryColor: color,
       palette: deriveCategoryPalette(color),
       mapsUrl: place && typeof place.mapsUrl === 'string' ? place.mapsUrl : '',
@@ -332,7 +344,11 @@
   }
 
   function projectThreeDaySchedules(anchorDate, schedules, options) {
-    var dates = buildThreeDayWindow(anchorDate);
+    return projectDateSchedules(anchorDate, schedules, 3, options);
+  }
+
+  function projectDateSchedules(anchorDate, schedules, dayCount, options) {
+    var dates = buildDateWindow(anchorDate, dayCount);
     var source = schedules || [];
     var list = Array.isArray(source) ? source : [];
     return {
@@ -352,6 +368,7 @@
 
   var api = {
     addCalendarDays: addCalendarDays,
+    buildDateWindow: buildDateWindow,
     buildThreeDayWindow: buildThreeDayWindow,
     minutesFromDayStart: minutesFromDayStart,
     timeToTop: timeToTop,
@@ -361,6 +378,7 @@
     contrastRatio: contrastRatio,
     deriveCategoryPalette: deriveCategoryPalette,
     projectDaySchedule: projectDaySchedule,
+    projectDateSchedules: projectDateSchedules,
     projectThreeDaySchedules: projectThreeDaySchedules
   };
 
