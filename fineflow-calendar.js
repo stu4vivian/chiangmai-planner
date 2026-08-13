@@ -271,7 +271,8 @@
   function cardContent(occurrence, places, trip) {
     var place = occurrence && occurrence.placeId ? places[occurrence.placeId] || null : null;
     var isCustom = occurrence && occurrence.custom && occurrence.custom.title;
-    var title = place && place.name || (isCustom ? occurrence.custom.title : '資料缺漏');
+    var isTransport = occurrence && occurrence.scheduleKind === 'transport';
+    var title = isTransport && isCustom ? occurrence.custom.title : place && place.name || (isCustom ? occurrence.custom.title : '資料缺漏');
     var categoryKey = place && place.type || occurrence && occurrence.category || '其他';
     var color = categoryColor(trip, categoryKey);
     return {

@@ -158,6 +158,10 @@
 
   function occurrenceTitle(item) {
     item = occurrenceOf(item) || {};
+    if (isTransportOccurrence(item)) {
+      if (item.custom && item.custom.title) return item.custom.title;
+      if (item.transport && item.transport.routeLabel) return item.transport.routeLabel;
+    }
     if (item.placeId && typeof getPlace === 'function') {
       var place = getPlace(item.placeId);
       if (place && place.name) return place.name;
