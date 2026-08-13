@@ -304,9 +304,9 @@ function renderLib(){
 
 function slotMetaOf(day,slot){ return slotMetaArr.find(m=>m.day===day&&m.slot===slot); }
 function occurrenceMainTitle(e,p){
+  if(p&&p.name) return p.name;
   const customTitle=e&&e.custom&&typeof e.custom.title==='string'?e.custom.title.trim():'';
   if(customTitle) return customTitle;
-  if(p&&p.name) return p.name;
   const routeLabel=e&&e.transport&&typeof e.transport.routeLabel==='string'?e.transport.routeLabel.trim():'';
   return routeLabel;
 }
@@ -314,7 +314,7 @@ function occurrenceView(e){
   const p=e&&getPlace(e.placeId);
   // 粗流與細流只是同一筆 occurrence 的兩種視圖；排進行程後一律開共用編輯器。
   // 地點庫裡尚未排入的 place 仍走自己的地點卡編輯，不在這裡混成另一套行程編輯。
-  // 主標題與細流一致：occurrence.custom.title 優先，place 只提供 emoji、tier、Maps 等地點資料。
+  // 有地點卡時，粗流與細流都以原地點卡名稱為準；只有純自訂／交通才使用 occurrence 名稱。
   const name=occurrenceMainTitle(e,p);
   if(!name) return null;
   return {place:p||null,name,emoji:p?placeEmoji(p):esc(temoji((e&&e.category)||'其他')),action:'ff-card-detail'};

@@ -158,11 +158,11 @@
 
   function occurrenceTitle(item) {
     item = occurrenceOf(item) || {};
-    if (item.custom && item.custom.title) return item.custom.title;
     if (item.placeId && typeof getPlace === 'function') {
       var place = getPlace(item.placeId);
       if (place && place.name) return place.name;
     }
+    if (item.custom && item.custom.title) return item.custom.title;
     if (item.transport && item.transport.routeLabel) return item.transport.routeLabel;
     return kindLabel(item.scheduleKind);
   }
