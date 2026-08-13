@@ -11,6 +11,8 @@
     pixelsPerHour: 64,
     minimumCardHeight: 18,
     laneGapPercent: 1.5,
+    titleOnlyMaxMinutes: 45,
+    titleOnlyHeight: 40,
     mediumHeight: 48,
     largeHeight: 88
   };
@@ -164,9 +166,11 @@
     return laidOut.sort(compareIntervals);
   }
 
-  function cardDensity(height, options) {
+  function cardDensity(height, options, durationMinutes) {
     var config = mergeOptions(options);
     var value = Math.max(0, finiteNumber(height, 0));
+    var duration = finiteNumber(durationMinutes, null);
+    if ((duration != null && duration <= config.titleOnlyMaxMinutes) || value < config.titleOnlyHeight) return 'small';
     if (value >= config.largeHeight) return 'large';
     if (value >= config.mediumHeight) return 'medium';
     return 'small';
@@ -327,7 +331,7 @@
         endAt: occurrence.fine.endAt,
         startLabel: formatTime(occurrence.fine.startAt),
         endLabel: formatTime(occurrence.fine.endAt),
-        density: cardDensity(geometry.rawHeight, config)
+        density: cardDensity(geometry.rawHeight, config, geometry.durationMinutes)
       }, geometry, content));
     });
 

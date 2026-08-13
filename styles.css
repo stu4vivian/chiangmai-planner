@@ -436,6 +436,9 @@
   /* ── 桌機表格版：開卡片/占用面板（右側 380px 浮層）會蓋住表格右段且點不到 → 開 sheet 時格線右側保留 380px 給浮層、表格欄(原 max-content 會撐大)改 minmax(0,…) 可縮 → .ovt-wrap 橫向捲、後段天數全可點（修 bug1；既有桌機版面問題、非本次新功能造成） ── */
   @media(min-width:1100px){
     body.libcollapsed.sheet-open{grid-template-columns:var(--mapW) minmax(0,1fr) 46px;padding-right:380px;}
+    /* 細流的編輯器是覆蓋式抽屜：保留七日行程原寬；粗流表格仍沿用上一條讓位規則。 */
+    body.libcollapsed.sheet-open:has(#pg-fineflow:not([hidden])){grid-template-columns:var(--mapW) minmax(0,1fr);padding-right:0;}
+    body.libcollapsed.sheet-open:has(#mapdrawer.collapsed):has(#pg-fineflow:not([hidden])){grid-template-columns:46px minmax(0,1fr);}
   }
   /* ── 版本列（openVersions）：扁平髮絲線列＋墨左槓標現用版（取代舊綠點/米色）── */
   .vrow{position:relative;padding:9px 4px 9px 11px;border-top:1px solid var(--line-2);cursor:pointer;}
@@ -1182,7 +1185,9 @@
   .ff-cal-card-title{display:-webkit-box;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:10px;line-height:1.13;font-weight:750;overflow-wrap:anywhere;}
   .ff-cal-type-icon{margin-right:3px;font-size:.9em;font-weight:500;}
   .ff-cal-card-time{flex:none;margin-top:2px;font-size:8px;line-height:1.15;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.78;}
-  .ff-cal-card-note{display:-webkit-box;min-width:0;min-height:0;margin-top:3px;overflow:hidden;font-size:8px;line-height:1.15;font-weight:560;white-space:normal;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:3;opacity:.72;}
+  .ff-cal-card-note{display:-webkit-box;min-width:0;min-height:0;margin-top:3px;overflow:hidden;font-size:11px;line-height:1.3;font-weight:560;white-space:normal;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:3;opacity:.92;}
+  .ff-cal-card-map-link{position:absolute;right:4px;bottom:4px;z-index:3;min-width:24px;min-height:24px;display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:7px;background:rgba(255,255,255,.9);color:inherit;font-size:12px;line-height:1;text-decoration:none;box-shadow:0 1px 4px rgba(20,20,35,.12);}
+  .ff-cal-card-map-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
   .ff-cal-card-flags{position:absolute;right:3px;top:3px;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;font-size:8px;line-height:1;white-space:nowrap;}
   .ff-cal-conflict{flex:none;width:13px;height:13px;display:grid;place-items:center;border-radius:50%;background:var(--danger);color:#fff;font-size:9px;font-weight:800;}
   .ff-cal-progress,.ff-cal-meta-icon{flex:none;font-size:8px;font-weight:750;opacity:.8;}
@@ -1210,6 +1215,7 @@
   .ff-cal-card.density-small .ff-cal-card-main{justify-content:flex-start;padding:2px 4px 1px;}
   .ff-cal-card.density-small .ff-cal-card-time{display:none;}
   .ff-cal-card.density-small .ff-cal-card-note{display:none;}
+  .ff-cal-card.density-small .ff-cal-card-map-link{display:none;}
   .ff-cal-card.density-small .ff-cal-card-title{display:block;height:14px;margin:0;overflow:hidden;font-size:9px;line-height:14px;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal;}
   .ff-cal-card.density-small .ff-cal-card-flags{position:absolute;right:2px;top:2px;margin:0;}
   .ff-cal-card.density-small .ff-cal-card-flags>*:not(.ff-cal-conflict){display:none;}

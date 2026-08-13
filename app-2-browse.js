@@ -303,14 +303,21 @@ function renderLib(){
 }
 
 function slotMetaOf(day,slot){ return slotMetaArr.find(m=>m.day===day&&m.slot===slot); }
+function occurrenceMainTitle(e,p){
+  const customTitle=e&&e.custom&&typeof e.custom.title==='string'?e.custom.title.trim():'';
+  if(customTitle) return customTitle;
+  if(p&&p.name) return p.name;
+  const routeLabel=e&&e.transport&&typeof e.transport.routeLabel==='string'?e.transport.routeLabel.trim():'';
+  return routeLabel;
+}
 function occurrenceView(e){
   const p=e&&getPlace(e.placeId);
   // 粗流與細流只是同一筆 occurrence 的兩種視圖；排進行程後一律開共用編輯器。
   // 地點庫裡尚未排入的 place 仍走自己的地點卡編輯，不在這裡混成另一套行程編輯。
-  if(p) return {place:p,name:p.name,emoji:placeEmoji(p),action:'ff-card-detail'};
-  const name=e&&e.custom&&e.custom.title;
-  if(name) return {place:null,name,emoji:esc(temoji(e.category||'其他')),action:'ff-card-detail'};
-  return null;
+  // 主標題與細流一致：occurrence.custom.title 優先，place 只提供 emoji、tier、Maps 等地點資料。
+  const name=occurrenceMainTitle(e,p);
+  if(!name) return null;
+  return {place:p||null,name,emoji:p?placeEmoji(p):esc(temoji((e&&e.category)||'其他')),action:'ff-card-detail'};
 }
 // ── 總覽・編輯時間軸（模式1，定稿＝v1-編輯時間軸_真資料.html）：直向一天一段、早午晚直堆、大日號＋區域左帽/小標＋rubric＋髮絲線。
 //    矩陣＝導航（spec §0）：整天可點 openday→展開細排；早午晚＝合併摘要、空段顯示淡＋（永不直接加，因一段含 2–3 真實格）。資料同源 CNXCore.overviewModel。──
@@ -322,7 +329,7 @@ function tlPeriodHTML(items,tentative,col){
     let lis=items.map(it=>{
       const view=occurrenceView(plan.find(e=>e.id===it.eid)), p=view&&view.place, tn=(p&&p.tier)||0;
       const warn=it.warn?`<span class="tlwarn" title="${esc(it.warn)}">⚠️</span>`:'';
-      return `<li data-eid="${esc(it.eid)}" data-slot="${esc(it.slot)}"${view?` data-action="${view.action}"`:''}>${warn}<span class="e">${view?view.emoji:'📅'}</span><span class="nm">${esc(it.name)}</span>${tn?`<span class="t" style="color:${col}">T${tn}</span>`:''}</li>`;   // data-eid/slot＝日卡項目可拖（切片 B・日卡跨天）
+      return `<li data-eid="${esc(it.eid)}" data-slot="${esc(it.slot)}"${view?` data-action="${view.action}"`:''}>${warn}<span class="e">${view?view.emoji:'📅'}</span><span class="nm">${esc(view?view.name:it.name)}</span>${tn?`<span class="t" style="color:${col}">T${tn}</span>`:''}</li>`;   // data-eid/slot＝日卡項目可拖（切片 B・日卡跨天）
     }).join('');
     if(tentative) lis+='<li class="tent">⏳ 待定</li>';   // 有項目又標待定→也提示（保留舊行為）
     return lis;

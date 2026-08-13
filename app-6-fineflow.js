@@ -532,6 +532,7 @@
         '<span class="ff-cal-card-time">' + h(card.startLabel + '–' + card.endLabel) + '</span>' + note + todo +
         '<span class="ff-cal-card-flags">' + (card.fixed ? '<span title="固定">鎖</span>' : '') + (conflict ? '<span class="ff-cal-conflict" title="有衝突">!</span>' : '') + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
       '</div>' +
+      (map ? '<a class="ff-cal-card-map-link" href="' + h(map) + '" target="_blank" rel="noopener noreferrer" aria-label="在 Google Maps 開啟' + h(card.title) + '">Maps ↗</a>' : '') +
       desktopControls +
       '<span hidden data-action="ff-edit" data-eid="' + h(card.id) + '"></span>' +
     '</article>';
@@ -750,12 +751,107 @@
     return fineSort(parts.precise.concat(parts.unplanned)).filter(function (candidate) { return candidate.id !== item.id; });
   }
 
-  function resolutionLabel(resolution, issue) {
-    if (resolution.label) return resolution.label;
-    if (resolution.message) return resolution.message;
+  function transactionScheduleForIssue(transaction, issue) {
+    if (!transaction) return null;
+    if (issue && issue.day && transaction.afterSchedules && transaction.afterSchedules[issue.day]) return transaction.afterSchedules[issue.day];
+    return transaction.afterSchedule || null;
+  }
+
+  function issueOccurrence(transaction, issue, id) {
+    var schedule = transactionScheduleForIssue(transaction, issue);
+    var scheduled = schedule && Array.isArray(schedule.items) && schedule.items.find(function (item) { return item.id === id; });
+    if (scheduled) return scheduled;
+    var mutation = transaction && Array.isArray(transaction.mutations) && transaction.mutations.find(function (entry) { return entry.occurrenceId === id; });
+    return mutation && mutation.after || findOccurrence(id);
+  }
+
+  function occurrenceDateLabel(item) {
+    var iso = item && item.fine && item.fine.startAt;
+    if (!iso) return '';
+    var parts = iso.slice(0, 10).split('-');
+    return parts.length === 3 ? (+parts[1]) + '/' + (+parts[2]) : '';
+  }
+
+  function occurrenceTimeLabel(item, edge) {
+    if (!item || !item.fine) return '時間未定';
+    return timeFromIso(edge === 'end' ? item.fine.endAt : item.fine.startAt) || '時間未定';
+  }
+
+  function issueRouteLabel(transaction, issue, left, right) {
+    if (!left || !right) return '';
+    var date = occurrenceDateLabel(right) || occurrenceDateLabel(left);
+    return (date ? date + ' ' : '') + occurrenceTitle(left) + ' ' + occurrenceTimeLabel(left, 'end') + ' 結束 → ' + occurrenceTitle(right) + ' ' + occurrenceTimeLabel(right, 'start') + ' 開始';
+  }
+
+  function issueDescription(issue, transaction) {
+    var ids = issue.occurrenceIds || [];
+    var left = issueOccurrence(transaction, issue, ids[0]);
+    var right = issueOccurrence(transaction, issue, ids[1]);
+    var minutes = Math.max(0, +issue.minutes || 0);
+    if ((issue.type === 'gap' || issue.type === 'conflict') && left && right) {
+      return issueRouteLabel(transaction, issue, left, right) + '：' + (issue.type === 'gap' ? '空檔 ' : '重疊 ') + minutes + ' 分鐘';
+    }
+    if (issue.type === 'travel_shortage' && left) {
+      var from = left.transport && issueOccurrence(transaction, issue, left.transport.fromOccurrenceId);
+      var to = left.transport && issueOccurrence(transaction, issue, left.transport.toOccurrenceId);
+      var route = from && to ? occurrenceTitle(from) + ' → ' + occurrenceTitle(to) : occurrenceTitle(left);
+      return (occurrenceDateLabel(left) ? occurrenceDateLabel(left) + ' ' : '') + route + '：交通時間還缺 ' + minutes + ' 分鐘';
+    }
+    if (issue.type === 'unknown_travel' && left) {
+      var schedule = transactionScheduleForIssue(transaction, issue);
+      var items = schedule && Array.isArray(schedule.items) ? schedule.items : [];
+      var index = items.findIndex(function (item) { return item.id === left.id; });
+      if (isTransportOccurrence(left)) {
+        var actualFrom = index > 0 ? items[index - 1] : null;
+        var actualTo = index >= 0 && index + 1 < items.length ? items[index + 1] : null;
+        var missing = [];
+        if (!left.transport || !left.transport.fromOccurrenceId) missing.push('起點');
+        if (!left.transport || !left.transport.toOccurrenceId) missing.push('終點');
+        if (!left.transport || !(+left.transport.minDurationMin > 0)) missing.push('交通時間');
+        if (issue.actualOccurrenceIds && issue.expectedOccurrenceIds) missing.push('正確的前後銜接');
+        var actualRoute = actualFrom || actualTo ? (actualFrom ? occurrenceTitle(actualFrom) : '起點未定') + ' → ' + (actualTo ? occurrenceTitle(actualTo) : '終點未定') : occurrenceTitle(left);
+        return actualRoute + '：缺少' + (missing.length ? missing.join('、') : '可用的路線資料');
+      }
+      var previous = index > 0 ? items[index - 1] : null;
+      var next = index >= 0 && index + 1 < items.length ? items[index + 1] : null;
+      var routes = [];
+      if (previous) routes.push(occurrenceTitle(previous) + ' → ' + occurrenceTitle(left));
+      if (next) routes.push(occurrenceTitle(left) + ' → ' + occurrenceTitle(next));
+      return (routes.length ? routes.join('、') + '：' : occurrenceTitle(left) + '：') + '「' + occurrenceTitle(left) + '」缺少地點資料，無法確認交通時間';
+    }
+    if (left) {
+      return (occurrenceDateLabel(left) ? occurrenceDateLabel(left) + ' ' : '') + occurrenceTitle(left) + ' ' + occurrenceTimeLabel(left, 'start') + '：' + (issue.message || (minutes ? '相差 ' + minutes + ' 分鐘' : '需要確認'));
+    }
+    return issue.message || (minutes ? '相差 ' + minutes + ' 分鐘' : '請選擇要如何處理');
+  }
+
+  function resolutionImpact(resolution, transaction) {
+    var api = ffApi();
+    var rid = resolution && (resolution.id || resolution.resolutionId || resolution.action || resolution.type);
+    if (!rid || typeof api.applyResolution !== 'function') return 0;
+    try {
+      var preview = api.applyResolution(transaction, rid);
+      return preview && Array.isArray(preview.mutations) ? preview.mutations.filter(function (mutation) {
+        if (!mutation.before || !mutation.after || !mutation.before.fine || !mutation.after.fine) return false;
+        return mutation.before.fine.startAt !== mutation.after.fine.startAt || mutation.before.fine.endAt !== mutation.after.fine.endAt;
+      }).length : 0;
+    } catch (_) { return 0; }
+  }
+
+  function resolutionLabel(resolution, issue, transaction) {
     var action = resolution.action || resolution.type || resolution.id || '';
-    var title = issue && issue.occurrenceIds && issue.occurrenceIds.length ? occurrenceTitle(findOccurrence(issue.occurrenceIds[0])) : '行程';
-    return ({ connect: '接續後面行程', push: '後面順延', shorten: '縮短' + title, keep_gap: '保留這段空檔', accept_conflict: '保留衝突', override_anchor: '這次仍要移動固定行程', relink_transport: '依目前前後行程重新連結交通', cancel_swap: '取消交換' })[action] || action || '套用這個修復';
+    var target = resolution.occurrenceId && issueOccurrence(transaction, issue, resolution.occurrenceId);
+    var title = target ? occurrenceTitle(target) : (issue && issue.occurrenceIds && issue.occurrenceIds.length ? occurrenceTitle(issueOccurrence(transaction, issue, issue.occurrenceIds[0])) : '行程');
+    var minutes = Math.max(0, +(resolution.minutes != null ? resolution.minutes : issue && issue.minutes) || 0);
+    var affected = resolutionImpact(resolution, transaction);
+    if (action === 'connect') return '將' + title + '提前 ' + minutes + ' 分鐘' + (affected > 1 ? '，共調整 ' + affected + ' 項' : '');
+    if (action === 'push') return '將後面 ' + (affected || 1) + ' 項順延 ' + minutes + ' 分鐘';
+    if (action === 'shorten') return '將' + title + '縮短 ' + minutes + ' 分鐘';
+    if (action === 'keep_gap') return '保留這段 ' + minutes + ' 分鐘空檔';
+    if (action === 'accept_conflict') return '保留 ' + minutes + ' 分鐘重疊（這次）';
+    if (action === 'override_anchor') return '移動固定行程' + (affected ? '，共調整 ' + affected + ' 項' : '') + (minutes ? '、' + minutes + ' 分鐘' : '');
+    if (action === 'relink_transport') return '改連為' + occurrenceTitle(issueOccurrence(transaction, issue, resolution.fromOccurrenceId)) + ' → ' + occurrenceTitle(issueOccurrence(transaction, issue, resolution.toOccurrenceId));
+    return resolution.label || resolution.message || action || '套用這個修復';
   }
 
   function issueTitle(issue) {
@@ -769,17 +865,26 @@
     return [];
   }
 
-  function issueCard(issue, index) {
+  function issueCard(issue, index, transaction, options) {
+    options = options || {};
     var resolutions = Array.isArray(issue.resolutions) ? issue.resolutions : [];
     var status = issue.status || 'new';
     var statusText = issue.accepted ? '已接受，保留警示' : (({ preexisting: '原本已有', worsened: '本次惡化', resolved: '已處理', new: '本次新增' })[status] || '');
     return '<article class="ff-issue ' + h(issue.severity || 'warning') + (status === 'resolved' ? ' resolved' : '') + '">' +
       '<div class="ff-issue-no">' + (index + 1) + '</div><div class="ff-issue-body"><div class="ff-issue-head"><b>' + h(issueTitle(issue)) + '</b><span>' + h(statusText) + '</span></div>' +
-      '<p>' + h(issue.message || (issue.minutes ? '相差 ' + issue.minutes + ' 分鐘' : '請選擇要如何處理')) + '</p>' +
-      (resolutions.length ? '<div class="ff-resolutions">' + resolutions.map(function (resolution, rIndex) {
+      '<p>' + h(issueDescription(issue, transaction)) + '</p>' +
+      (options.showResolutions !== false && resolutions.length ? '<div class="ff-resolutions">' + resolutions.map(function (resolution, rIndex) {
         var rid = resolution.id || resolution.resolutionId || resolution.action || resolution.type;
-        return '<button type="button" data-action="ff-resolution" data-id="' + h(rid) + '"' + (rIndex === 0 ? ' class="recommended"' : '') + '>' + h(resolutionLabel(resolution, issue)) + '</button>';
-      }).join('') + '</div>' : (status === 'resolved' ? '' : '<span class="ff-unresolved">尚未找到可自動處理的做法</span>')) + '</div></article>';
+        return '<button type="button" data-action="ff-resolution" data-id="' + h(rid) + '"' + (rIndex === 0 ? ' class="recommended"' : '') + '>' + h(resolutionLabel(resolution, issue, transaction)) + '</button>';
+      }).join('') + '</div>' : (options.showResolutions === false || status === 'resolved' || issue.accepted ? '' : '<span class="ff-unresolved">目前沒有可自動套用的做法，仍可自行調整時間或資料</span>')) + '</div></article>';
+  }
+
+  function editorChangeSummary(editor, pendingCount) {
+    var changes = [];
+    if (editor.originalDate !== editor.date) changes.push('日期：' + editor.originalDate + ' → ' + editor.date);
+    if (editor.originalStart !== editor.start || editor.originalEnd !== editor.end) changes.push('時間：' + editor.originalStart + '–' + editor.originalEnd + ' → ' + editor.start + '–' + editor.end);
+    if (editor.coarseVisible && editor.originalCoarseSlot !== editor.coarseSlot) changes.push('粗流時段：' + coarseSlotLabel(editor.originalCoarseSlot) + ' → ' + coarseSlotLabel(editor.coarseSlot));
+    return '<section class="ff-change-summary" aria-label="本次修改摘要"><div class="ff-change-head"><div><span>本次修改</span><b>' + h(changes.length ? changes.join('；') : '日期與時間沒有變更') + '</b></div><span>尚待決定 ' + pendingCount + ' 項</span></div></section>';
   }
 
   function summaryText(transaction) {
@@ -881,12 +986,13 @@
     var duration = editor.durationMin;
     var transaction = editor.transaction;
     var issues = transactionIssues(transaction);
+    var pendingIssues = issues.filter(function (issue) { return !issue.accepted && (issue.status === 'new' || issue.status === 'worsened'); });
+    var preexistingIssues = issues.filter(function (issue) { return issue.status === 'preexisting'; });
+    var handledIssues = issues.filter(function (issue) { return issue.accepted || issue.status === 'resolved'; });
     var candidates = scheduleCandidates(editor);
-    var blocking = issues.some(function (issue) {
-      if (issue.status === 'resolved' || issue.accepted) return false;
+    var blocking = pendingIssues.some(function (issue) {
       if (issue.severity === 'blocking') return true;
-      return (issue.status === 'new' || issue.status === 'worsened') &&
-        (issue.type === 'conflict' || issue.type === 'travel_shortage' || issue.type === 'anchor_violation' || issue.type === 'day_overflow');
+      return issue.type === 'conflict' || issue.type === 'travel_shortage' || issue.type === 'anchor_violation' || issue.type === 'day_overflow';
     });
     var linkedDay = dayIdForDate(editor.date);
     var coarseControls = '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-coarse' + (editor.coarseVisible ? ' checked' : '') + '><span><b>' + (editor.coarseVisible ? '粗流也顯示這項' : '只在細流') + '</b><small>' + (editor.coarseVisible ? '同一筆行程・' + h((dayMeta(linkedDay).label || linkedDay) + '・' + coarseSlotLabel(editor.coarseSlot)) : '適合交通、銜接與不需要出現在大方向的行程') + '</small></span></label>' +
@@ -920,11 +1026,23 @@
       '<label class="ff-field"><span>最低分鐘</span><input type="number" inputmode="numeric" min="1" max="1440" data-ff-min value="' + h(editor.minDurationMin) + '"' + (editor.compressibility === 'none' ? ' disabled' : '') + '></label></div>' +
       '</div></details>';
     var notice = editor.notice ? '<div class="ff-preview-state notice" role="status">' + h(editor.notice) + '</div>' : '';
+    var issueGroups = '';
+    if (pendingIssues.length) {
+      issueGroups += '<section class="ff-issues ff-current-issues"><div class="ff-section-title">這次修改需要處理（' + pendingIssues.length + '）</div>' + pendingIssues.map(function (issue, index) { return issueCard(issue, index, transaction); }).join('') + '</section>';
+    } else if (transaction) {
+      issueGroups += '<div class="ff-no-issue">✓ 這次修改沒有新增需要處理的問題</div>';
+    }
+    if (preexistingIssues.length) {
+      issueGroups += '<details class="ff-rules ff-existing-issues"><summary>這天原本就有的提醒（' + preexistingIssues.length + '）</summary><div class="ff-rules-body">' + preexistingIssues.map(function (issue, index) { return issueCard(issue, index, transaction, { showResolutions: false }); }).join('') + '</div></details>';
+    }
+    if (handledIssues.length) {
+      issueGroups += '<details class="ff-rules ff-handled-issues"><summary>這次已決定或已處理（' + handledIssues.length + '）</summary><div class="ff-rules-body">' + handledIssues.map(function (issue, index) { return issueCard(issue, index, transaction, { showResolutions: false }); }).join('') + '</div></details>';
+    }
     var preview = editor.previewing ? '<div class="ff-preview-state" role="status">正在檢查時間…</div>' :
       editor.error ? '<div class="ff-preview-state error" role="alert">' + h(editor.error) + '</div>' :
-      (issues.length ? '<div class="ff-issues"><div class="ff-section-title">儲存前需要處理</div>' + issues.map(issueCard).join('') + '</div>' : '');
+      issueGroups;
     var html = '<div class="ff-sheet ff-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-editor-title"><div class="ff-sheet-head"><span class="ff-kicker">編輯' + h(kindLabel(item.scheduleKind)) + '</span><h3 id="ff-editor-title">' + h(editor.title || occurrenceTitle(item)) + '</h3><p>粗流與細流共用這一頁；儲存後兩邊會同步更新。</p></div>' +
-      '<div class="ff-sheet-scroll">' + titleField + editorFields + coarseControls + transportSection + mapSection + noteSection + todoSection + placeSection + coarsePlanning + rules + notice + preview + '</div>' +
+      '<div class="ff-sheet-scroll">' + editorChangeSummary(editor, pendingIssues.length) + titleField + editorFields + coarseControls + transportSection + mapSection + noteSection + todoSection + placeSection + coarsePlanning + rules + notice + preview + '</div>' +
       '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || blocking || !editor.title.trim() ? ' disabled' : '') + '>儲存</button></div></div>';
     openSheet(html, function () { renderEditor(); }, 'fineflow-editor');
   }
@@ -944,12 +1062,14 @@
       placeNote: place ? place.note || '' : '', placeId: item.placeId || null, originalPlaceId: item.placeId || null, placeCard: place ? copy(place) : null,
       date: fineDate(item),
       start: start, end: timeFromIso(item.fine && item.fine.endAt) || addMinutesToTime(start, duration),
+      originalDate: fineDate(item), originalStart: start, originalEnd: timeFromIso(item.fine && item.fine.endAt) || addMinutesToTime(start, duration),
       durationMin: duration, firstSchedule: !item.fine,
       fixedMarker: !!(item.fine && item.fine.fixedMarker),
       compressibility: item.fine && item.fine.compressibility || 'none',
       minDurationMin: item.fine && item.fine.minDurationMin || duration,
       coarseVisible: !!(item.day && item.slot), coarseDay: item.day || dayIdForDate(fineDate(item)),
       coarseSlot: item.slot || slotFromTime(start),
+      originalCoarseSlot: item.slot || slotFromTime(start),
       coarseOrder: Math.max(0, sameSlot.findIndex(function (entry) { return entry.id === item.id; })),
       coarsePk: !!(slotMeta && slotMeta.pk), backupIds: slotMeta && Array.isArray(slotMeta.backups) ? slotMeta.backups.slice(0, 2) : [],
       transport: copy(item.transport || {}),
