@@ -328,7 +328,8 @@
     };
   }
 
-  var SCHEDULE_KINDS = { place:1, custom:1, connector_travel:1, booked_transport:1, flight:1, sleep:1 };
+  // transport 是新模型的通用銜接段；舊種類仍保留，讓現有資料可無損載入。
+  var SCHEDULE_KINDS = { place:1, custom:1, transport:1, connector_travel:1, booked_transport:1, flight:1, sleep:1 };
   var COMPRESSIBILITY = { none:1, suggest:1, free:1 };
   var TIME_COMMITMENTS = { flexible:1, preferred:1, external:1 };
   var AUTO_MOVE_POLICIES = { auto:1, confirm:1, manual:1 };
@@ -436,14 +437,15 @@
   // slot 只代表「是否／在哪個粗流時段顯示」；fine 與 startTime 是細流時間，兩者不互相覆寫。
   function coarseFlowState(occurrence) {
     occurrence = occurrence || {};
+    var day = (typeof occurrence.day === 'string' && occurrence.day.trim()) ? occurrence.day.trim() : null;
     var slot = (typeof occurrence.slot === 'string' && occurrence.slot.trim()) ? occurrence.slot.trim() : null;
     var fineStart = occurrence.fine && typeof occurrence.fine.startAt === 'string' ? occurrence.fine.startAt.slice(11, 16) : '';
     var fineDate = occurrence.fine && typeof occurrence.fine.startAt === 'string' ? occurrence.fine.startAt.slice(0, 10) : '';
     var suggestedSlot = slotFromTime(fineStart || occurrence.startTime);
     var suggestedDay = /^\d{4}-\d{2}-\d{2}$/.test(fineDate) ? fineDate.slice(5, 7) + fineDate.slice(8, 10) : null;
     return {
-      included: !!slot,
-      day: (typeof occurrence.day === 'string' && occurrence.day) ? occurrence.day : null,
+      included: !!(day && slot),
+      day: day,
       slot: slot,
       suggestedDay: suggestedDay,
       suggestedSlot: suggestedSlot,
@@ -455,7 +457,7 @@
     var out = JSON.parse(JSON.stringify(occurrence));
     placement = placement || {};
     if (Object.prototype.hasOwnProperty.call(placement, 'day')) {
-      out.day = (typeof placement.day === 'string' && placement.day.trim()) ? placement.day.trim() : out.day;
+      out.day = (typeof placement.day === 'string' && placement.day.trim()) ? placement.day.trim() : null;
     }
     if (Object.prototype.hasOwnProperty.call(placement, 'slot')) {
       out.slot = (typeof placement.slot === 'string' && placement.slot.trim()) ? placement.slot.trim() : null;
@@ -584,9 +586,14 @@
     (places || []).forEach(function (p) { byId[p.id] = p; });
     var occurrenceIds = {};
     (plan || []).forEach(function (e) { if (e && e.id) occurrenceIds[e.id] = true; });
+    var countedOccurrenceIds = {};
     var out = [];
     (plan || []).forEach(function (e) {
-      // 細流只是根粗流的時間化投影時，費用仍由根卡計一次。
+      if (!e) return;
+      // 同一 occurrence ID 即使因舊同步衝突重複出現，也只計費一次。
+      if (e.id && countedOccurrenceIds[e.id]) return;
+      if (e.id) countedOccurrenceIds[e.id] = true;
+      // 僅作為舊「根粗流＋細流投影」資料的防重相容；新模型不需要 coarseOccurrenceIds。
       if (e && e.fine && Array.isArray(e.coarseOccurrenceIds) && e.coarseOccurrenceIds.some(function (id) { return occurrenceIds[id] && id !== e.id; })) return;
       var p = byId[e.placeId];
       if (!p || !p.cost || typeof p.cost.amount !== 'number') return;

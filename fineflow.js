@@ -126,13 +126,7 @@
 
   function buildDaySchedule(version, day, trip) {
     var plan = version && Array.isArray(version.plan) ? version.plan : [];
-    var coveredCoarseIds = {};
-    plan.forEach(function (item) {
-      if (!item || !item.fine || !Array.isArray(item.coarseOccurrenceIds)) return;
-      item.coarseOccurrenceIds.forEach(function (id) { if (typeof id === 'string' && id) coveredCoarseIds[id] = true; });
-    });
     var all = plan
-      .filter(function (item) { return item && !coveredCoarseIds[item.id]; })
       .filter(function (item) { return item && scheduleDayId(item) === day; })
       .map(function (item) { return normalizeFineOccurrence(item, trip || {}); });
     var items = [];
@@ -192,6 +186,7 @@
 
   function classifyTransportOccurrence(occurrence) {
     var kind = occurrence && occurrence.scheduleKind;
+    if (kind === 'transport') return { key: 'connector', fixed: false, shortenable: false, requiresConfirmation: false };
     if (kind === 'connector_travel') return { key: 'connector', fixed: false, shortenable: false, requiresConfirmation: false };
     if (kind === 'booked_transport') return { key: 'booked', fixed: true, shortenable: false, requiresConfirmation: true };
     if (kind === 'flight') return { key: 'long_haul', fixed: true, shortenable: false, requiresConfirmation: true };
@@ -295,15 +290,22 @@
       }
       var interval = occurrenceInterval(item);
       var transport = item.transport;
-      if (!transport || !asInt(transport.minDurationMin, 0, 1) || !transport.fromOccurrenceId || !transport.toOccurrenceId) {
+      var previousId = index > 0 ? items[index - 1].id : null;
+      var nextId = index + 1 < items.length ? items[index + 1].id : null;
+      // 一天最前／最後一段交通可以只接一側行程；另一側用 routeLabel 表達旅館、機場等邊界目的地。
+      var completeEndpoints = !!(transport && transport.fromOccurrenceId && transport.toOccurrenceId);
+      var validBoundaryRoute = !!(transport && typeof transport.routeLabel === 'string' && transport.routeLabel.trim() && (
+        (!previousId && !transport.fromOccurrenceId && transport.toOccurrenceId) ||
+        (!nextId && transport.fromOccurrenceId && !transport.toOccurrenceId)
+      ));
+      if (!transport || !asInt(transport.minDurationMin, 0, 1) || (!completeEndpoints && !validBoundaryRoute)) {
         issues.push(makeIssue('unknown_travel', [item.id], 0, '交通時間或起訖資料不足，無法確認路線', 'warning'));
         return;
       }
       var shortage = transport.minDurationMin - interval.durationMin;
       if (shortage > 0) issues.push(makeIssue('travel_shortage', [item.id], shortage, '交通至少還缺 ' + shortage + ' 分鐘', 'blocking'));
-      var previousId = index > 0 ? items[index - 1].id : null;
-      var nextId = index + 1 < items.length ? items[index + 1].id : null;
-      if (previousId !== transport.fromOccurrenceId || nextId !== transport.toOccurrenceId) {
+      if ((transport.fromOccurrenceId ? previousId !== transport.fromOccurrenceId : previousId !== null) ||
+          (transport.toOccurrenceId ? nextId !== transport.toOccurrenceId : nextId !== null)) {
         issues.push(makeIssue('unknown_travel', [item.id], 0, '交通目前沒有連接原本的起點與終點，需重新確認路線', 'blocking', {
           expectedOccurrenceIds: [transport.fromOccurrenceId, transport.toOccurrenceId],
           actualOccurrenceIds: [previousId, nextId]

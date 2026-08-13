@@ -75,6 +75,34 @@
     }).filter(Boolean);
   }
 
+  function mapsPlaceId(value) {
+    var raw = text(value);
+    if (!raw) return '';
+    try {
+      var parsed = new URL(raw);
+      var direct = text(parsed.searchParams.get('query_place_id')) || text(parsed.searchParams.get('place_id'));
+      if (direct) return direct.toLowerCase();
+      var decoded = decodeURIComponent(parsed.pathname + parsed.search);
+      var match = decoded.match(/(?:place_id:|!1s)(ChI[A-Za-z0-9_-]+)/i);
+      return match ? match[1].toLowerCase() : '';
+    } catch (_error) { return ''; }
+  }
+
+  function dedupeOccurrenceMapLinks(links, place) {
+    var primaryPlaceId = text(place && place.placeId).toLowerCase() || mapsPlaceId(place && place.mapsUrl);
+    var seen = {};
+    if (primaryPlaceId) seen['place:' + primaryPlaceId] = true;
+    return (Array.isArray(links) ? links : []).filter(function (link) {
+      var url = text(typeof link === 'string' ? link : link && link.url);
+      var explicit = text(link && typeof link === 'object' && link.placeId).toLowerCase();
+      var mapId = explicit || mapsPlaceId(url);
+      var key = mapId ? 'place:' + mapId : 'url:' + url;
+      if (!url || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+  }
+
   function todoIdFor(itemExternalId, todoExternalId) {
     return 'ffi_t_' + hash(itemExternalId + '/' + todoExternalId);
   }
@@ -253,6 +281,9 @@
         out.push(id);
       }
     });
+    if (out.length > 1) {
+      errors.push(problem(index, externalId, 'coarseOccurrenceIds', 'MULTIPLE_COARSE_OCCURRENCES', '一筆細流只能連結一張粗流卡；不同粗流行程不可合併', { occurrenceIds: out }));
+    }
     return out;
   }
 
@@ -378,11 +409,23 @@
       category: text(item.category) || (source.place && text(source.place.type)) || '其他',
       notes: text(item.notes),
       // 卡片本身的 Maps 由 place.mapsUrl 顯示；這裡只保存本次行程明示的額外連結。
-      mapLinks: normalizeMapLinks(item),
+      mapLinks: dedupeOccurrenceMapLinks(normalizeMapLinks(item), source.place),
       seq: index,
       startTime: text(item.startTime),
-      coarseOccurrenceIds: coarseOccurrenceIds
+      coarseOccurrenceIds: []
     };
+    var coarseRoot = coarseOccurrenceIds.length === 1 && context.version && context.version.plan.find(function (entry) { return entry.id === coarseOccurrenceIds[0]; });
+    if (coarseRoot) {
+      occurrence.id = coarseRoot.id;
+      occurrence.day = coarseRoot.day;
+      occurrence.slot = coarseRoot.slot;
+      occurrence.seq = coarseRoot.seq;
+      if (!occurrence.notes) occurrence.notes = coarseRoot.notes || '';
+      occurrence.todos = (coarseRoot.todos || []).concat(occurrence.todos || []).filter(function (todo, todoIndex, all) {
+        return all.findIndex(function (entry) { return entry.id === todo.id; }) === todoIndex;
+      });
+      occurrence.mapLinks = dedupeOccurrenceMapLinks((coarseRoot.mapLinks || []).concat(occurrence.mapLinks || []), source.place);
+    }
     occurrence = context.core.normalizeOccurrence(occurrence);
     if (!occurrence || !occurrence.fine) {
       errors.push(problem(index, externalId, null, 'NORMALIZATION_FAILED', '無法轉換為 schema v21 行程'));
@@ -398,7 +441,8 @@
         notes: text(item.notes),
         mapsUrl: source.mapsUrl || '',
         sourceKind: source.kind
-      }
+      },
+      rootOccurrence: coarseRoot ? clone(coarseRoot) : null
     };
   }
 
@@ -412,7 +456,15 @@
     Object.keys(byDay).sort().forEach(function (day) {
       var before = fineflow.buildDaySchedule(version, day, { timeZone: timeZone });
       var previewVersion = clone(version);
-      previewVersion.plan = (previewVersion.plan || []).concat(clone(byDay[day]));
+      var replacements = {};
+      byDay[day].forEach(function (occurrence) { replacements[occurrence.id] = occurrence; });
+      previewVersion.plan = (previewVersion.plan || []).map(function (entry) {
+        if (!replacements[entry.id]) return entry;
+        var replacement = replacements[entry.id];
+        delete replacements[entry.id];
+        return clone(replacement);
+      });
+      Object.keys(replacements).forEach(function (id) { previewVersion.plan.push(clone(replacements[id])); });
       var after = fineflow.buildDaySchedule(previewVersion, day, { timeZone: timeZone });
       fineflow.detectScheduleIssues(before, after, {}).forEach(function (issue) {
         issues.push(Object.assign({ day: day }, clone(issue)));
@@ -451,6 +503,7 @@
     var places = Array.isArray(options.places) ? options.places : [];
     var alreadyImported = importedSet(options.importedExternalIds);
     var seen = new Set();
+    var claimedRoots = {};
     var existingIds = new Set(version.plan.map(function (occurrence) { return occurrence && occurrence.id; }).filter(Boolean));
     var changes = [];
     payload.items.forEach(function (item, index) {
@@ -471,12 +524,20 @@
       result.errors = result.errors.concat(converted.errors);
       result.needsInput = result.needsInput.concat(converted.needsInput);
       if (!converted.occurrence) return;
+      if (converted.rootOccurrence) {
+        if (claimedRoots[converted.rootOccurrence.id]) {
+          result.errors.push(problem(index, externalId, 'coarseOccurrenceIds', 'COARSE_OCCURRENCE_REUSED', '同一張粗流卡不可被多筆細流共用', { occurrenceId: converted.rootOccurrence.id, firstExternalId: claimedRoots[converted.rootOccurrence.id] }));
+          return;
+        }
+        claimedRoots[converted.rootOccurrence.id] = externalId;
+      }
       result.occurrences.push(converted.occurrence);
       existingIds.add(converted.occurrence.id);
       changes.push({
-        type: 'add-occurrence',
+        type: converted.rootOccurrence ? 'update-occurrence' : 'add-occurrence',
         externalId: externalId,
         occurrence: clone(converted.occurrence),
+        before: clone(converted.rootOccurrence),
         supplemental: clone(converted.supplemental)
       });
     });
@@ -494,7 +555,8 @@
         changes: changes,
         issues: clone(result.conflicts),
         summary: {
-          add: changes.length,
+          add: changes.filter(function (change) { return change.type === 'add-occurrence'; }).length,
+          update: changes.filter(function (change) { return change.type === 'update-occurrence'; }).length,
           skipped: result.skipped.length,
           needsInput: result.needsInput.length,
           errors: result.errors.length,
@@ -502,7 +564,7 @@
         }
       };
     }
-    result.canApply = !!result.transaction;
+    result.canApply = !!result.transaction && result.errors.length === 0 && result.needsInput.length === 0;
     return result;
   }
 
@@ -531,12 +593,17 @@
     var ids = new Set(out.plan.map(function (occurrence) { return occurrence && occurrence.id; }).filter(Boolean));
     var importedExternalIds = importedSet(options.importedExternalIds);
     transaction.changes.forEach(function (change) {
-      if (!change || change.type !== 'add-occurrence') throw new Error('Unsupported import change');
+      if (!change || (change.type !== 'add-occurrence' && change.type !== 'update-occurrence')) throw new Error('Unsupported import change');
       var normalized = core.normalizeOccurrence(clone(change.occurrence));
       if (!normalized || !normalized.id || !normalized.fine) throw new Error('Import change contains an invalid occurrence');
-      if (ids.has(normalized.id)) return;
-      ids.add(normalized.id);
-      out.plan.push(normalized);
+      if (change.type === 'update-occurrence') {
+        var targetIndex = out.plan.findIndex(function (entry) { return entry.id === normalized.id; });
+        if (targetIndex < 0) throw new Error('Import update target no longer exists');
+        out.plan[targetIndex] = normalized;
+      } else if (!ids.has(normalized.id)) {
+        ids.add(normalized.id);
+        out.plan.push(normalized);
+      }
       if (change.externalId) importedExternalIds.add(String(change.externalId));
     });
     return { version: out, importedExternalIds: Array.from(importedExternalIds).sort() };
