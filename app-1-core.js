@@ -155,7 +155,9 @@ function gmaps(p){
   if(p.lat&&p.lng) return base+encodeURIComponent(p.lat+','+p.lng); // 有座標無 placeId：釘精確座標
   return base+encodeURIComponent((term||'')+' Chiang Mai');         // 都沒有：用店名搜尋
 }
-function placeSched(id){ return plan.filter(e=>e.placeId===id).map(e=>{const d=DAYS.find(x=>x.id===e.day)||{label:e.day};return (d.label||e.day||'?')+' '+slotObj(e.slot).label;}); }   // ||{} 防呆：匯入越界日（不在 DAYS）不崩 renderLib
+// slot 為 null＝只活在細流（按過「回板凳」但留著細流安排），沒有粗流時段可寫，
+// 硬接 slotObj(null).label 會印出「已排 8/29 null」。這種只標日期，不編造時段。
+function placeSched(id){ return plan.filter(e=>e.placeId===id&&(e.slot||e.day)).map(e=>{const d=DAYS.find(x=>x.id===e.day)||{label:e.day};const day=d.label||e.day||'?';return e.slot?day+' '+slotObj(e.slot).label:day;}); }   // ||{} 防呆：匯入越界日（不在 DAYS）不崩 renderLib
 
 let toastT=null;
 function toast(msg, opts){ const el=document.getElementById('toast'); clearTimeout(toastT);

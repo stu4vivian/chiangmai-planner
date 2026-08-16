@@ -306,18 +306,16 @@ function slotMetaOf(day,slot){ return slotMetaArr.find(m=>m.day===day&&m.slot===
 function occurrenceMainTitle(e,p){
   if(p&&p.name) return p.name;
   const customTitle=e&&e.custom&&typeof e.custom.title==='string'?e.custom.title.trim():'';
-  if(customTitle) return customTitle;
-  const routeLabel=e&&e.transport&&typeof e.transport.routeLabel==='string'?e.transport.routeLabel.trim():'';
-  return routeLabel;
+  return customTitle;
 }
 function occurrenceView(e){
   const p=e&&getPlace(e.placeId);
-  // 粗流與細流只是同一筆 occurrence 的兩種視圖；排進行程後一律開共用編輯器。
-  // 地點庫裡尚未排入的 place 仍走自己的地點卡編輯，不在這裡混成另一套行程編輯。
-  // 有地點卡時，粗流與細流都以原地點卡名稱為準；只有純自訂／交通才使用 occurrence 名稱。
+  // 標題兩邊仍然一致（有地點卡就用地點卡名稱），但「點下去開什麼」回到 a5dd847 之前：
+  // 有地點卡→占用面板（粗流本來就順手的那個），只有純自訂／交通才進細流編輯器。
+  // 粗流是「大方向」，不該被細流那套逐分鐘編輯器接管。
   const name=occurrenceMainTitle(e,p);
   if(!name) return null;
-  return {place:p||null,name,emoji:p?placeEmoji(p):esc(temoji((e&&e.category)||'其他')),action:'ff-card-detail'};
+  return {place:p||null,name,emoji:p?placeEmoji(p):esc(temoji((e&&e.category)||'其他')),action:p?'occpanel':'ff-card-detail'};
 }
 // ── 總覽・編輯時間軸（模式1，定稿＝v1-編輯時間軸_真資料.html）：直向一天一段、早午晚直堆、大日號＋區域左帽/小標＋rubric＋髮絲線。
 //    矩陣＝導航（spec §0）：整天可點 openday→展開細排；早午晚＝合併摘要、空段顯示淡＋（永不直接加，因一段含 2–3 真實格）。資料同源 CNXCore.overviewModel。──
@@ -378,10 +376,12 @@ function renderOverviewTable(){   // v1 風格：每排固定 OVT_WEEK 天、上
 }
 function ovtTable(days, reco){   // 版① 扁平髮絲線 CSS grid（定稿 A-版1-真實上下區）：時段欄＋天欄、cell 只有底髮絲線、欄距斷線；item＝純 emoji＋店名（無小卡/色條）。互動沿用：cell→pickslot、item→occpanel、住宿→hotel-pick（直接換飯店）。待命中空格亮 armdrop。
   const regOf=d=>(CNXCore.baseForDay(base,d.id)||{}).region||'';
-  let h=`<div class="ovg" style="grid-template-columns:var(--ovtSL) repeat(${days.length},var(--ovtDay))"><div class="ovg-cap"></div>`;
+  // minmax(欄寬,1fr)：--ovtDay 是保底不是上限。寬螢幕平均撐滿（不留右側空白），窄視窗仍不壓扁、照舊右滑。
+  let h=`<div class="ovg" style="grid-template-columns:var(--ovtSL) repeat(${days.length},minmax(var(--ovtDay),1fr))"><div class="ovg-cap"></div>`;
   days.forEach(d=>{ const r=regOf(d);
     const dp=d.label.split('/'), dmo=dp[0], dday=dp[1]||d.label;   // 每天「8/29（六）」＝日期都一樣大＋星期全形括弧；地區第二排（Vivian）
-    h+=`<div class="ovg-hd" style="--rg:${zoneColor(r)}"><div class="dhd">${esc(dmo)}/${esc(dday)}<span class="wd">（${esc(d.wd)}）</span></div><span class="rg">${esc(regionLabel(r)||'—')}</span></div>`;
+    // 日期欄頭→開這天細排。住宿格改開住宿規劃後，表格版就沒有任何「開這天」的入口了（桌機預設就是表格版）。
+    h+=`<div class="ovg-hd" style="--rg:${zoneColor(r)}" data-action="openday" data-day="${d.id}"><div class="dhd">${esc(dmo)}/${esc(dday)}<span class="wd">（${esc(d.wd)}）</span></div><span class="rg">${esc(regionLabel(r)||'—')}</span></div>`;
   });
   SLOTS.forEach(s=>{
     const lab=s.kind==='meal'?s.label:(s.kind==='stay'?'住宿':(s.ctx||s.label));

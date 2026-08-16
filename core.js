@@ -328,12 +328,12 @@
     };
   }
 
-  // transport 是新模型的通用銜接段；舊種類仍保留，讓現有資料可無損載入。
-  var SCHEDULE_KINDS = { place:1, custom:1, transport:1, connector_travel:1, booked_transport:1, flight:1, sleep:1 };
+  // 交通不是特殊行程，只是一張 day/slot 都是 null（因此不出現在粗流）的普通行程卡。
+  var SCHEDULE_KINDS = { place:1, custom:1, sleep:1 };
   var COMPRESSIBILITY = { none:1, suggest:1, free:1 };
   var TIME_COMMITMENTS = { flexible:1, preferred:1, external:1 };
   var AUTO_MOVE_POLICIES = { auto:1, confirm:1, manual:1 };
-  var TRANSPORT_SOURCES = { manual:1, maps:1 };
+  var TRAVEL_MODES = { walk:1, drive:1, transit:1, flight:1 };
 
   function safeNonNegativeInt(value, fallback) {
     return (typeof value === 'number' && isFinite(value) && value >= 0) ? Math.round(value) : fallback;
@@ -381,16 +381,9 @@
       manualOrder: safeNonNegativeInt(value.manualOrder, 0)
     };
   }
-  function normalizeTransport(value) {
-    if (!value || typeof value !== 'object') return null;
-    return {
-      fromOccurrenceId: (typeof value.fromOccurrenceId === 'string' && value.fromOccurrenceId) ? value.fromOccurrenceId : null,
-      toOccurrenceId: (typeof value.toOccurrenceId === 'string' && value.toOccurrenceId) ? value.toOccurrenceId : null,
-      mode: safeStr(value.mode).trim(),
-      minDurationMin: safeNonNegativeInt(value.minDurationMin, 0),
-      source: TRANSPORT_SOURCES[value.source] ? value.source : 'manual',
-      routeLabel: safeStr(value.routeLabel).trim()
-    };
+  function normalizeTravelMode(value) {
+    var mode = safeStr(value).trim();
+    return TRAVEL_MODES[mode] ? mode : '';
   }
   function normalizeTodos(value) {
     return (Array.isArray(value) ? value : []).map(function (todo) {
@@ -479,7 +472,7 @@
       slot: e.slot,
       fine: normalizeFine(e.fine),
       scheduleKind: kind,
-      transport: normalizeTransport(e.transport),
+      travelMode: normalizeTravelMode(e.travelMode),
       todos: normalizeTodos(e.todos),
       category: safeStr(e.category).trim(),
       notes: safeStr(e.notes),
@@ -492,9 +485,34 @@
     return out;
   }
 
+  // 舊資料裡「交通」是四種特殊 scheduleKind＋一包 transport 欄位；新模型只留一張普通行程卡。
+  // 必須在 normalizeOccurrence 之前跑（它會把未知 scheduleKind 與 transport 直接丟掉）。冪等：跑第二次沒有舊 kind 就原樣回傳。
+  var LEGACY_TRANSPORT_KINDS = { transport: '移動', connector_travel: '接駁交通', booked_transport: '預約交通', flight: '航班' };
+  function migrateTransportOccurrence(e) {
+    if (!e || typeof e !== 'object') return e;
+    var legacyLabel = LEGACY_TRANSPORT_KINDS[e.scheduleKind];
+    if (!legacyLabel) return e;
+    var transport = (e.transport && typeof e.transport === 'object') ? e.transport : {};
+    var out = Object.assign({}, e);
+    var title = (out.custom && typeof out.custom.title === 'string' ? out.custom.title.trim() : '') ||
+      safeStr(transport.routeLabel).trim() || legacyLabel;
+    out.custom = Object.assign({}, out.custom || {}, { title: title });
+    out.travelMode = normalizeTravelMode(transport.mode) || normalizeTravelMode(e.travelMode) || (e.scheduleKind === 'flight' ? 'flight' : '');
+    if (out.fine && typeof out.fine === 'object') {
+      out.fine = Object.assign({}, out.fine);
+      out.fine.minDurationMin = Math.max(safeNonNegativeInt(out.fine.minDurationMin, 0), safeNonNegativeInt(transport.minDurationMin, 0));
+      // 航班與已預訂交通原本靠 classifyTransportOccurrence 判定固定；classify 拿掉後改寫成使用者可見的固定標記，才不會被「連動後面」推走。
+      if (e.scheduleKind === 'booked_transport' || e.scheduleKind === 'flight') out.fine.fixedMarker = true;
+    }
+    if (!safeStr(out.category).trim()) out.category = '交通';
+    out.scheduleKind = (typeof e.placeId === 'string' && e.placeId) ? 'place' : 'custom';
+    delete out.transport;   // day/slot 本來就是 null，維持不動＝繼續不顯示在粗流
+    return out;
+  }
+
   function migrateVersion(v, zoneMap) {
     v = v || {};
-    var plan = (Array.isArray(v.plan) ? v.plan : []).map(normalizeOccurrence).filter(Boolean);
+    var plan = (Array.isArray(v.plan) ? v.plan : []).map(migrateTransportOccurrence).map(normalizeOccurrence).filter(Boolean);
     var base = (Array.isArray(v.base) ? v.base : []).map(function (s) {
       if (!s) return null;
       var region = s.region || (zoneMap && zoneMap[s.zone]) || s.zone || '';
@@ -1089,6 +1107,36 @@
     return '';
   }
 
+  // 細流營業時間提醒：給一張地點卡＋這次行程的起訖 ISO（帶時區），回「講事實」的提醒陣列。
+  // 只講已知事實（公休日／幾點開／幾點關），沒有 hours 資料就回空陣列，絕不編造。
+  function hhmm(hours) {
+    var total = Math.round((hours % 24) * 60);
+    return pad2(Math.floor(total / 60)) + ':' + pad2(total % 60);
+  }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function wallHours(iso) {                      // 取 ISO 的當地牆上時間（不換算時區），回小數小時
+    var m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(String(iso || ''));
+    return m ? { date: m[1], hours: +m[2] + (+m[3]) / 60 } : null;
+  }
+  function hoursWarnings(place, startAt, endAt) {
+    if (!place) return [];
+    var start = wallHours(startAt);
+    if (!start) return [];
+    var weekday = new Date(start.date + 'T00:00:00Z').getUTCDay();
+    if (!Number.isFinite(weekday)) return [];
+    if (Array.isArray(place.closedDays) && place.closedDays.indexOf(weekday) >= 0) {
+      return ['週' + WD_ZH[weekday] + '公休'];
+    }
+    var range = parseHoursRange(place.hours);
+    if (!range) return [];
+    var end = wallHours(endAt);
+    var endHours = end ? end.hours + (end.date > start.date ? 24 : 0) : null;
+    var out = [];
+    if (start.hours < range.s) out.push(hhmm(range.s) + ' 才開始營業');
+    if (endHours != null && endHours > range.e) out.push(hhmm(range.e) + ' 就打烊了');
+    return out;
+  }
+
   // 同源聚合（§Phase 1 同源根）：把一份 plan 投影成「天×早午晚」格子模型。
   // 回傳每天一物件 { day, periods: { 早:[item], 午:[item], 晚:[item] } }，item＝{ eid, placeId, name, type, slot, warn }。
   // 規則：排除 hideInOverview===true、排除 slotPeriod 為 null（stay 等）、段內依 slotOrderInPeriod 排序、孤兒 plan（找不到 place）跳過。
@@ -1308,7 +1356,7 @@
     return out;
   }
 
-  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, slotFromTime: slotFromTime, coarseFlowState: coarseFlowState, withCoarsePlacement: withCoarsePlacement, withCoarseSlot: withCoarseSlot, defaultPer: defaultPer, normalizePlace: normalizePlace, normalizeOccurrence: normalizeOccurrence, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, setRegionNights: setRegionNights, setHotelNights: setHotelNights, splitSegTail: splitSegTail, refitBaseToRange: refitBaseToRange, mergeBaseSegs: mergeBaseSegs, reorderRegionHotels: reorderRegionHotels, removeHotelSeg: removeHotelSeg, addHotelToRegion: addHotelToRegion, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, applyWashokuPalette: applyWashokuPalette, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, occSpotlightIds: occSpotlightIds, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
+  var api = { SCHEMA_VERSION: SCHEMA_VERSION, WD_ZH: WD_ZH, OVERVIEW_PERIODS: OVERVIEW_PERIODS, slotPeriod: slotPeriod, slotOrderInPeriod: slotOrderInPeriod, slotFromTime: slotFromTime, coarseFlowState: coarseFlowState, withCoarsePlacement: withCoarsePlacement, withCoarseSlot: withCoarseSlot, defaultPer: defaultPer, normalizePlace: normalizePlace, normalizeOccurrence: normalizeOccurrence, classifyPriceBand: classifyPriceBand, parseLatLngFromMapsUrl: parseLatLngFromMapsUrl, passFilters: passFilters, migrate: migrate, deriveBaseFromStay: deriveBaseFromStay, getActiveVersion: getActiveVersion, setActiveVersion: setActiveVersion, duplicateVersion: duplicateVersion, renameVersion: renameVersion, deleteVersion: deleteVersion, baseForDay: baseForDay, setRegionNights: setRegionNights, setHotelNights: setHotelNights, splitSegTail: splitSegTail, refitBaseToRange: refitBaseToRange, mergeBaseSegs: mergeBaseSegs, reorderRegionHotels: reorderRegionHotels, removeHotelSeg: removeHotelSeg, addHotelToRegion: addHotelToRegion, expandForScope: expandForScope, occurrenceContribs: occurrenceContribs, manualContribs: manualContribs, rollupBudget: rollupBudget, scheduledPlaceIds: scheduledPlaceIds, isScheduled: isScheduled, priceBandOf: priceBandOf, passLibFilters: passLibFilters, merge3wayById: merge3wayById, mergeObjField: mergeObjField, mergeVersions: mergeVersions, mergeDb: mergeDb, CM_TRIP_DEFAULT: CM_TRIP_DEFAULT, normalizeTrip: normalizeTrip, applyWashokuPalette: applyWashokuPalette, deriveDays: deriveDays, parseHoursRange: parseHoursRange, openSlotsFromHours: openSlotsFromHours, closedDaysFromText: closedDaysFromText, openDaysFromText: openDaysFromText, condenseHours: condenseHours, applyHoursDerived: applyHoursDerived, cellWarning: cellWarning, hoursWarnings: hoursWarnings, overviewModel: overviewModel, distanceM: distanceM, findDuplicate: findDuplicate, nearestRegion: nearestRegion, anchorsForSlot: anchorsForSlot, emptySlotDist: emptySlotDist, dayReferencePoint: dayReferencePoint, recommendSlots: recommendSlots, nextDayId: nextDayId, getSlotMeta: getSlotMeta, ensureSlotMeta: ensureSlotMeta, pruneSlotMeta: pruneSlotMeta, setSlotFlag: setSlotFlag, addBackup: addBackup, removeBackup: removeBackup, swapOccurrence: swapOccurrence, occSpotlightIds: occSpotlightIds, findByKey: findByKey, catLabel: catLabel, catColor: catColor, catIcon: catIcon, roleOf: roleOf, regionLabel: regionLabel, regionColor: regionColor, regionOf: regionOf, cuisineLabel: cuisineLabel, normPriceBands: normPriceBands, categoryInUse: categoryInUse, regionInUse: regionInUse, canDeleteCategory: canDeleteCategory, canDeleteRegion: canDeleteRegion };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CNXCore = api;

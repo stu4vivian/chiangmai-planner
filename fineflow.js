@@ -5,9 +5,6 @@
 
   var MINUTE_MS = 60000;
   var ISO_WITH_ZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
-  var COMPRESSIBILITY = { none: 1, suggest: 1, free: 1 };
-  var COMMITMENT = { flexible: 1, preferred: 1, external: 1 };
-  var MOVE_POLICY = { auto: 1, confirm: 1, manual: 1 };
 
   function clone(value) {
     if (value == null) return value;
@@ -70,7 +67,6 @@
     out.id = typeof out.id === 'string' ? out.id : '';
     out.placeId = typeof out.placeId === 'string' ? out.placeId : null;
     out.todos = Array.isArray(out.todos) ? out.todos : [];
-    if (Object.prototype.hasOwnProperty.call(out, 'transport') && (!out.transport || typeof out.transport !== 'object')) out.transport = null;
     if (!out.fine || typeof out.fine !== 'object' || !validIso(out.fine.startAt) || !validIso(out.fine.endAt) || Date.parse(out.fine.endAt) <= Date.parse(out.fine.startAt)) {
       out.fine = null;
       return out;
@@ -83,11 +79,7 @@
     }
     var fine = clone(out.fine);
     fine.originalDurationMin = asInt(fine.originalDurationMin, duration, 1);
-    fine.minDurationMin = Math.min(duration, asInt(fine.minDurationMin, duration, 1));
-    fine.compressibility = COMPRESSIBILITY[fine.compressibility] ? fine.compressibility : 'none';
     fine.fixedMarker = !!fine.fixedMarker;
-    fine.timeCommitment = COMMITMENT[fine.timeCommitment] ? fine.timeCommitment : 'flexible';
-    fine.autoMovePolicy = MOVE_POLICY[fine.autoMovePolicy] ? fine.autoMovePolicy : 'auto';
     fine.manualOrder = asInt(fine.manualOrder, 0, 0);
     out.fine = fine;
     out.startTime = fine.startAt.slice(11, 16);
@@ -177,29 +169,19 @@
     return {
       day: value.day || null,
       timeZone: value.timeZone || null,
-      dayEndAt: value.dayEndAt || null,
       items: items,
       unscheduled: unscheduled,
       all: items.concat(unscheduled)
     };
   }
 
-  function classifyTransportOccurrence(occurrence) {
-    var kind = occurrence && occurrence.scheduleKind;
-    if (kind === 'transport') return { key: 'connector', fixed: false, shortenable: false, requiresConfirmation: false };
-    if (kind === 'connector_travel') return { key: 'connector', fixed: false, shortenable: false, requiresConfirmation: false };
-    if (kind === 'booked_transport') return { key: 'booked', fixed: true, shortenable: false, requiresConfirmation: true };
-    if (kind === 'flight') return { key: 'long_haul', fixed: true, shortenable: false, requiresConfirmation: true };
-    return null;
-  }
-
+  // 固定＝「標記為固定行程」；航班／已預訂交通在資料遷移時就寫進 fine.fixedMarker，不再靠 scheduleKind 判斷。
   function isFixed(item) {
-    var transportClass = classifyTransportOccurrence(item);
-    return !!(item && item.fine && (item.fine.fixedMarker || item.fine.timeCommitment === 'external' || item.fine.autoMovePolicy === 'manual')) || !!(transportClass && transportClass.fixed);
+    return !!(item && item.fine && item.fine.fixedMarker);
   }
 
   function isAutoMovable(item) {
-    return !!(item && item.fine && !isFixed(item) && item.fine.autoMovePolicy === 'auto');
+    return !!(item && item.fine) && !isFixed(item);
   }
 
   function continuousMovableBlock(schedule, startIndex, options) {
@@ -230,202 +212,6 @@
     return null;
   }
 
-  function issueId(type, occurrenceIds) {
-    return type + ':' + occurrenceIds.join('>');
-  }
-
-  function makeIssue(type, ids, minutes, message, severity, extra) {
-    return Object.assign({
-      id: issueId(type, ids),
-      type: type,
-      status: 'new',
-      severity: severity || 'warning',
-      occurrenceIds: ids,
-      minutes: Math.max(0, Math.round(minutes || 0)),
-      message: message,
-      resolutions: []
-    }, extra || {});
-  }
-
-  function derivedDayEnd(schedule, context) {
-    if (context && validIso(context.dayEndAt)) return context.dayEndAt;
-    if (validIso(schedule.dayEndAt)) return schedule.dayEndAt;
-    var first = schedule.items[0];
-    if (!first || !first.fine || !validIso(first.fine.startAt)) return null;
-    var start = first.fine.startAt;
-    var midnight = start.slice(0, 10) + 'T00:00:00' + offsetSuffix(start);
-    return shiftIso(midnight, 24 * 60);
-  }
-
-  function rawIssues(schedule, context) {
-    schedule = asSchedule(schedule);
-    context = context || {};
-    var items = schedule.items;
-    var issues = [];
-    for (var i = 1; i < items.length; i++) {
-      var previous = occurrenceInterval(items[i - 1]);
-      var current = occurrenceInterval(items[i]);
-      var delta = Math.round((current.startMs - previous.endMs) / MINUTE_MS);
-      var intentionalGapId = issueId('gap', [items[i - 1].id, items[i].id]);
-      var intentionalGaps = context.intentionalGapIds || [];
-      var intentional = !!(items[i].fine && items[i].fine.intentionalGapBefore) || intentionalGaps.indexOf(intentionalGapId) >= 0;
-      if (delta > 0 && !intentional) {
-        issues.push(makeIssue('gap', [items[i - 1].id, items[i].id], delta, '兩項行程之間有 ' + delta + ' 分鐘空檔', 'info'));
-      } else if (delta < 0) {
-        var acceptedWith = items[i].fine && Array.isArray(items[i].fine.acceptedConflictWith) ? items[i].fine.acceptedConflictWith : [];
-        issues.push(makeIssue('conflict', [items[i - 1].id, items[i].id], -delta, '兩項行程重疊 ' + (-delta) + ' 分鐘', 'warning', {
-          accepted: acceptedWith.indexOf(items[i - 1].id) >= 0
-        }));
-      }
-    }
-
-    items.forEach(function (item, index) {
-      var transportClass = classifyTransportOccurrence(item);
-      if (!transportClass) {
-        var missingLocations = context.missingLocationOccurrenceIds || [];
-        if (item.scheduleKind === 'place' && (!item.placeId || missingLocations.indexOf(item.id) >= 0)) {
-          issues.push(makeIssue('unknown_travel', [item.id], 0, '地點資料不足，無法確認前後交通', 'warning'));
-        }
-        return;
-      }
-      var interval = occurrenceInterval(item);
-      var transport = item.transport;
-      var previousId = index > 0 ? items[index - 1].id : null;
-      var nextId = index + 1 < items.length ? items[index + 1].id : null;
-      // 一天最前／最後一段交通可以只接一側行程；另一側用 routeLabel 表達旅館、機場等邊界目的地。
-      var completeEndpoints = !!(transport && transport.fromOccurrenceId && transport.toOccurrenceId);
-      var validBoundaryRoute = !!(transport && typeof transport.routeLabel === 'string' && transport.routeLabel.trim() && (
-        (!previousId && !transport.fromOccurrenceId && transport.toOccurrenceId) ||
-        (!nextId && transport.fromOccurrenceId && !transport.toOccurrenceId)
-      ));
-      if (!transport || !asInt(transport.minDurationMin, 0, 1) || (!completeEndpoints && !validBoundaryRoute)) {
-        issues.push(makeIssue('unknown_travel', [item.id], 0, '交通時間或起訖資料不足，無法確認路線', 'warning'));
-        return;
-      }
-      var shortage = transport.minDurationMin - interval.durationMin;
-      if (shortage > 0) issues.push(makeIssue('travel_shortage', [item.id], shortage, '交通至少還缺 ' + shortage + ' 分鐘', 'blocking'));
-      if ((transport.fromOccurrenceId ? previousId !== transport.fromOccurrenceId : previousId !== null) ||
-          (transport.toOccurrenceId ? nextId !== transport.toOccurrenceId : nextId !== null)) {
-        issues.push(makeIssue('unknown_travel', [item.id], 0, '交通目前沒有連接原本的起點與終點，需重新確認路線', 'blocking', {
-          expectedOccurrenceIds: [transport.fromOccurrenceId, transport.toOccurrenceId],
-          actualOccurrenceIds: [previousId, nextId]
-        }));
-      }
-    });
-
-    var dayEndAt = derivedDayEnd(schedule, context);
-    if (dayEndAt) {
-      var dayEndMs = Date.parse(dayEndAt);
-      items.forEach(function (item) {
-        var interval = occurrenceInterval(item);
-        if (interval.endMs > dayEndMs) {
-          var minutes = Math.ceil((interval.endMs - dayEndMs) / MINUTE_MS);
-          issues.push(makeIssue('day_overflow', [item.id], minutes, '行程超出當日 ' + minutes + ' 分鐘', 'blocking', { dayEndAt: dayEndAt }));
-        }
-      });
-    }
-    return issues;
-  }
-
-  function detectScheduleIssues(beforeSchedule, afterSchedule, context) {
-    var before = asSchedule(beforeSchedule);
-    var after = asSchedule(afterSchedule);
-    var effectiveContext = clone(context || {});
-    if (!effectiveContext.dayEndAt) effectiveContext.dayEndAt = derivedDayEnd(before, effectiveContext);
-    var beforeIssues = rawIssues(before, effectiveContext);
-    var afterIssues = rawIssues(after, effectiveContext);
-    var beforeMap = {};
-    var afterMap = {};
-    beforeIssues.forEach(function (issue) { beforeMap[issue.id] = issue; });
-    afterIssues.forEach(function (issue) { afterMap[issue.id] = issue; });
-
-    var beforeItems = {};
-    before.items.forEach(function (item) { beforeItems[item.id] = item; });
-    after.items.forEach(function (item) {
-      var old = beforeItems[item.id];
-      if (!old || !isFixed(old) || !isFixed(item)) return;
-      var oldInterval = occurrenceInterval(old);
-      var newInterval = occurrenceInterval(item);
-      if (oldInterval && newInterval && (oldInterval.startMs !== newInterval.startMs || oldInterval.endMs !== newInterval.endMs)) {
-        var minutes = Math.max(Math.abs(newInterval.startMs - oldInterval.startMs), Math.abs(newInterval.endMs - oldInterval.endMs)) / MINUTE_MS;
-        var issue = makeIssue('anchor_violation', [item.id], minutes, '固定標註行程被移動 ' + minutes + ' 分鐘', 'blocking');
-        afterIssues.push(issue);
-        afterMap[issue.id] = issue;
-      }
-    });
-
-    var result = [];
-    afterIssues.forEach(function (issue) {
-      var old = beforeMap[issue.id];
-      issue.status = !old ? 'new' : issue.minutes > old.minutes ? 'worsened' : 'preexisting';
-      result.push(issue);
-    });
-    beforeIssues.forEach(function (issue) {
-      if (!afterMap[issue.id]) {
-        var resolved = clone(issue);
-        resolved.status = 'resolved';
-        resolved.severity = 'info';
-        result.push(resolved);
-      }
-    });
-    var priority = { worsened: 0, new: 1, preexisting: 2, resolved: 3 };
-    return result.sort(function (a, b) {
-      return priority[a.status] - priority[b.status] || a.id.localeCompare(b.id);
-    });
-  }
-
-  function canShorten(item, minutes) {
-    var transportClass = classifyTransportOccurrence(item);
-    if (!item || !item.fine || transportClass || item.scheduleKind === 'sleep' || item.fine.compressibility === 'none') return false;
-    var interval = occurrenceInterval(item);
-    return !!interval && interval.durationMin - minutes >= item.fine.minDurationMin;
-  }
-
-  function suggestResolutions(issue, schedule, rules) {
-    rules = rules || {};
-    schedule = asSchedule(schedule);
-    var byId = {};
-    schedule.items.forEach(function (item) { byId[item.id] = item; });
-    var out = [];
-    function add(type, occurrenceId, label, extra) {
-      out.push(Object.assign({
-        id: issue.id + ':' + type + (occurrenceId ? ':' + occurrenceId : ''),
-        type: type,
-        issueId: issue.id,
-        occurrenceId: occurrenceId || null,
-        minutes: issue.minutes,
-        label: label
-      }, extra || {}));
-    }
-    if (!issue || issue.status === 'resolved') return out;
-    if (issue.type === 'gap') {
-      var gapTarget = byId[issue.occurrenceIds[1]];
-      if (gapTarget && isAutoMovable(gapTarget)) add('connect', gapTarget.id, '接續後面行程 ' + issue.minutes + ' 分鐘');
-      add('keep_gap', null, '保留 ' + issue.minutes + ' 分鐘空檔');
-    } else if (issue.type === 'conflict') {
-      var right = byId[issue.occurrenceIds[1]];
-      if (right && isAutoMovable(right)) add('push', right.id, '後面順延 ' + issue.minutes + ' 分鐘');
-      else if (right) add('override_anchor', right.id, '這次一起移動固定行程 ' + issue.minutes + ' 分鐘', { highRisk: true });
-      issue.occurrenceIds.forEach(function (id) {
-        if (canShorten(byId[id], issue.minutes)) add('shorten', id, '縮短 ' + id + ' ' + issue.minutes + ' 分鐘');
-      });
-      add('accept_conflict', null, '保留 ' + issue.minutes + ' 分鐘重疊');
-    } else if (issue.type === 'travel_shortage') {
-      var connector = byId[issue.occurrenceIds[0]];
-      if (connector) add('push', connector.id, '補足交通時間並順延後面 ' + issue.minutes + ' 分鐘', { extendTravel: true });
-    } else if (issue.type === 'unknown_travel') {
-      var travel = byId[issue.occurrenceIds[0]];
-      if (travel && classifyTransportOccurrence(travel) && issue.actualOccurrenceIds && issue.actualOccurrenceIds[0] && issue.actualOccurrenceIds[1]) {
-        add('relink_transport', travel.id, '依目前前後行程重新連結交通', {
-          fromOccurrenceId: issue.actualOccurrenceIds[0],
-          toOccurrenceId: issue.actualOccurrenceIds[1]
-        });
-      }
-    } else if (issue.type === 'anchor_violation') {
-      add('override_anchor', issue.occurrenceIds[0], '仍要移動固定行程', { highRisk: true });
-    }
-    return out;
-  }
 
   function changeTimes(item, request) {
     var out = clone(item);
@@ -440,13 +226,6 @@
     out.startTime = startAt.slice(11, 16);
     if (hasEnd && !out.fine.originalDurationMin) out.fine.originalDurationMin = interval.durationMin;
     if (Object.prototype.hasOwnProperty.call(request, 'fixedMarker')) out.fine.fixedMarker = !!request.fixedMarker;
-    if (Object.prototype.hasOwnProperty.call(request, 'compressibility') && COMPRESSIBILITY[request.compressibility]) out.fine.compressibility = request.compressibility;
-    if (Object.prototype.hasOwnProperty.call(request, 'timeCommitment') && COMMITMENT[request.timeCommitment]) out.fine.timeCommitment = request.timeCommitment;
-    if (Object.prototype.hasOwnProperty.call(request, 'autoMovePolicy') && MOVE_POLICY[request.autoMovePolicy]) out.fine.autoMovePolicy = request.autoMovePolicy;
-    if (Object.prototype.hasOwnProperty.call(request, 'minDurationMin')) {
-      var changedDuration = Math.round((Date.parse(endAt) - Date.parse(startAt)) / MINUTE_MS);
-      out.fine.minDurationMin = Math.min(changedDuration, asInt(request.minDurationMin, out.fine.minDurationMin, 1));
-    }
     return out;
   }
 
@@ -463,17 +242,10 @@
     return {
       day: base.day,
       timeZone: base.timeZone,
-      dayEndAt: base.dayEndAt || null,
       items: sorted,
       unscheduled: clone(base.unscheduled || []),
       all: sorted.concat(clone(base.unscheduled || []))
     };
-  }
-
-  function mutationReasonMap(mutations) {
-    var map = {};
-    (mutations || []).forEach(function (mutation) { map[mutation.occurrenceId] = mutation.reason; });
-    return map;
   }
 
   function makeMutations(beforeSchedule, afterSchedule, reasons, fallbackReason) {
@@ -498,25 +270,11 @@
       if (before && after && before.startMs !== after.startMs) moved++;
       if (before && after && after.durationMin < before.durationMin) shortened++;
     });
-    var unresolved = transaction.issues.filter(function (issue) {
-      return (issue.status === 'new' || issue.status === 'worsened') && !issue.accepted;
-    }).length;
     var end = null;
     transaction.afterSchedule.items.forEach(function (item) {
       if (!end || Date.parse(item.fine.endAt) > Date.parse(end)) end = item.fine.endAt;
     });
-    return { moved: moved, shortened: shortened, unresolved: unresolved, newDayEndAt: end };
-  }
-
-  function attachResolutions(transaction) {
-    transaction.issues.forEach(function (issue) {
-      issue.resolutions = suggestResolutions(issue, transaction.afterSchedule, transaction.rules || {});
-      var selected = transaction.selectedResolutions && transaction.selectedResolutions[issue.id];
-      if (selected && (selected.type === 'keep_gap' || selected.type === 'accept_conflict')) issue.accepted = true;
-      if (selected && selected.type === 'override_anchor' && issue.type === 'anchor_violation') issue.accepted = true;
-    });
-    transaction.summary = summaryFor(transaction);
-    return transaction;
+    return { moved: moved, shortened: shortened, newDayEndAt: end };
   }
 
   function newTransaction(operation, base, after, request, reasons) {
@@ -529,15 +287,13 @@
       day: base.day,
       baseFingerprint: baseFingerprint(base),
       mutations: makeMutations(base, after, reasons || {}, operation),
-      issues: detectScheduleIssues(base, after, request.context || {}),
-      selectedResolutions: {},
       summary: null,
       beforeSchedule: clone(base),
       afterSchedule: clone(after),
-      context: clone(request.context || {}),
       rules: clone(request.rules || {})
     };
-    return attachResolutions(transaction);
+    transaction.summary = summaryFor(transaction);
+    return transaction;
   }
 
   function previewSingleChange(schedule, request) {
@@ -557,38 +313,6 @@
 
   function dayIdFromIso(iso) {
     return validIso(iso) ? iso.slice(5, 7) + iso.slice(8, 10) : null;
-  }
-
-  function crossDayIssues(beforeSchedules, afterSchedules, days, contextByDay, rules, fixedMutation) {
-    var issues = [];
-    days.forEach(function (day) {
-      var after = afterSchedules[day];
-      detectScheduleIssues(beforeSchedules[day], after, contextByDay[day] || {}).forEach(function (issue) {
-        var out = clone(issue);
-        out.id = day + '|' + issue.id;
-        out.day = day;
-        out.resolutions = suggestResolutions(out, after, rules || {});
-        issues.push(out);
-      });
-    });
-    if (fixedMutation && isFixed(fixedMutation.before)) {
-      var beforeInterval = occurrenceInterval(fixedMutation.before);
-      var afterInterval = occurrenceInterval(fixedMutation.after);
-      if (beforeInterval && afterInterval &&
-          (beforeInterval.startMs !== afterInterval.startMs || beforeInterval.endMs !== afterInterval.endMs)) {
-        var minutes = Math.max(Math.abs(afterInterval.startMs - beforeInterval.startMs), Math.abs(afterInterval.endMs - beforeInterval.endMs)) / MINUTE_MS;
-        var anchor = makeIssue('anchor_violation', [fixedMutation.occurrenceId], minutes, '固定標註行程被移動 ' + minutes + ' 分鐘', 'blocking', {
-          day: dayIdFromIso(fixedMutation.after.fine.startAt)
-        });
-        anchor.id = 'cross|' + anchor.id;
-        anchor.resolutions = suggestResolutions(anchor, afterSchedules[anchor.day], rules || {});
-        issues.push(anchor);
-      }
-    }
-    var priority = { worsened: 0, new: 1, preexisting: 2, resolved: 3 };
-    return issues.sort(function (a, b) {
-      return (priority[a.status] || 0) - (priority[b.status] || 0) || a.id.localeCompare(b.id);
-    });
   }
 
   function crossDayMutations(beforeSchedules, afterSchedules, days, reasons) {
@@ -630,9 +354,6 @@
     var beforeSchedules = {};
     var afterSchedules = {};
     var baseFingerprints = {};
-    var contextByDay = clone(request.contextByDay || {});
-    if (!contextByDay[sourceDay] && request.sourceContext) contextByDay[sourceDay] = clone(request.sourceContext);
-    if (!contextByDay[targetDay] && request.targetContext) contextByDay[targetDay] = clone(request.targetContext);
     days.forEach(function (day) {
       beforeSchedules[day] = asSchedule(buildDaySchedule(version, day, trip));
       baseFingerprints[day] = baseFingerprint(beforeSchedules[day]);
@@ -663,7 +384,6 @@
       }
     }
     var mutations = crossDayMutations(beforeSchedules, afterSchedules, days, reasons);
-    var fixedMutation = mutations.find(function (mutation) { return mutation.occurrenceId === original.id; });
     var transaction = {
       id: request.transactionId || 'ff_cross_day_' + baseFingerprints[sourceDay] + '_' + baseFingerprints[targetDay],
       operation: 'cross_day',
@@ -676,15 +396,11 @@
       baseFingerprint: baseFingerprints[sourceDay],
       baseFingerprints: baseFingerprints,
       mutations: mutations,
-      issues: crossDayIssues(beforeSchedules, afterSchedules, days, contextByDay, request.rules || {}, fixedMutation),
-      selectedResolutions: {},
       summary: null,
       beforeSchedule: clone(beforeSchedules[sourceDay]),
       afterSchedule: clone(afterSchedules[targetDay]),
       beforeSchedules: clone(beforeSchedules),
       afterSchedules: clone(afterSchedules),
-      context: clone(request.context || {}),
-      contextByDay: contextByDay,
       rules: clone(request.rules || {}),
       planOrderBefore: version.plan.map(function (item) { return item && item.id; })
     };
@@ -748,182 +464,6 @@
     return newTransaction('swap', base, items, request, reasons);
   }
 
-  function resolutionById(transaction, resolutionId) {
-    for (var i = 0; i < transaction.issues.length; i++) {
-      var resolutions = transaction.issues[i].resolutions || [];
-      for (var j = 0; j < resolutions.length; j++) if (resolutions[j].id === resolutionId) return resolutions[j];
-    }
-    return null;
-  }
-
-  function rebuildAfterResolution(transaction, items, reasons, selected) {
-    var out = clone(transaction);
-    out.afterSchedule = scheduleWithItems(out.beforeSchedule, items);
-    out.mutations = makeMutations(out.beforeSchedule, out.afterSchedule, reasons, 'resolution');
-    out.issues = detectScheduleIssues(out.beforeSchedule, out.afterSchedule, out.context || {});
-    out.selectedResolutions = clone(transaction.selectedResolutions || {});
-    out.selectedResolutions[selected.issueId] = clone(selected);
-    return attachResolutions(out);
-  }
-
-  function applyCrossDayResolution(transaction, resolution) {
-    var sourceIssue = transaction.issues.find(function (candidate) { return candidate.id === resolution.issueId; });
-    if (!sourceIssue) throw new Error('Resolution issue is missing: ' + resolution.issueId);
-    var out = clone(transaction);
-    out.selectedResolutions = out.selectedResolutions || {};
-    if (resolution.type === 'override_anchor' && sourceIssue.type === 'anchor_violation') {
-      out.selectedResolutions[sourceIssue.id] = clone(resolution);
-      out.issues.forEach(function (issue) { if (issue.id === sourceIssue.id) issue.accepted = true; });
-      return attachCrossDay(out);
-    }
-    if (resolution.type !== 'accept_conflict' && resolution.type !== 'keep_gap') {
-      var local = {
-        id: transaction.id + '_day_' + sourceIssue.day,
-        operation: transaction.operation,
-        versionId: transaction.versionId,
-        day: sourceIssue.day,
-        baseFingerprint: transaction.baseFingerprints[sourceIssue.day],
-        mutations: clone(transaction.mutations || []),
-        issues: [clone(sourceIssue)],
-        selectedResolutions: {},
-        beforeSchedule: clone(transaction.beforeSchedules[sourceIssue.day]),
-        afterSchedule: clone(transaction.afterSchedules[sourceIssue.day]),
-        context: clone((transaction.contextByDay || {})[sourceIssue.day] || {}),
-        rules: clone(transaction.rules || {})
-      };
-      var localResolved = applyResolution(local, resolution);
-      var resolvedSchedules = clone(transaction.afterSchedules);
-      resolvedSchedules[sourceIssue.day] = clone(localResolved.afterSchedule);
-      var resolvedReasons = mutationReasonMap(transaction.mutations);
-      (localResolved.mutations || []).forEach(function (mutation) {
-        resolvedReasons[mutation.occurrenceId] = mutation.reason;
-      });
-      out.afterSchedules = resolvedSchedules;
-      out.afterSchedule = clone(resolvedSchedules[out.targetDay]);
-      out.mutations = crossDayMutations(out.beforeSchedules, resolvedSchedules, out.days, resolvedReasons);
-      var resolvedMain = out.mutations.find(function (mutation) {
-        return mutation.occurrenceId === (transaction.occurrenceId || transaction.mutations[0].occurrenceId);
-      });
-      out.issues = crossDayIssues(out.beforeSchedules, resolvedSchedules, out.days, out.contextByDay || {}, out.rules || {}, resolvedMain);
-      out.selectedResolutions[sourceIssue.id] = clone(resolution);
-      return attachCrossDay(out);
-    }
-    var day = sourceIssue.day;
-    var afterSchedules = clone(transaction.afterSchedules);
-    var items = afterSchedules[day].items;
-    var targetId = sourceIssue.occurrenceIds[1];
-    var target = items.find(function (item) { return item.id === targetId; });
-    if (!target || !target.fine) throw new Error('Accepted issue target is missing');
-    if (resolution.type === 'keep_gap') {
-      target.fine.intentionalGapBefore = true;
-    } else {
-      var previousId = sourceIssue.occurrenceIds[0];
-      var acceptedWith = Array.isArray(target.fine.acceptedConflictWith) ? target.fine.acceptedConflictWith.slice() : [];
-      if (acceptedWith.indexOf(previousId) < 0) acceptedWith.push(previousId);
-      target.fine.acceptedConflictWith = acceptedWith;
-    }
-    afterSchedules[day] = scheduleWithItems(afterSchedules[day], items);
-    var reasons = mutationReasonMap(transaction.mutations);
-    reasons[targetId] = resolution.type;
-    out.afterSchedules = afterSchedules;
-    out.afterSchedule = clone(afterSchedules[out.targetDay]);
-    out.mutations = crossDayMutations(out.beforeSchedules, afterSchedules, out.days, reasons);
-    var mainMutation = out.mutations.find(function (mutation) {
-      return mutation.occurrenceId === (transaction.occurrenceId || transaction.mutations[0].occurrenceId);
-    });
-    out.issues = crossDayIssues(out.beforeSchedules, afterSchedules, out.days, out.contextByDay || {}, out.rules || {}, mainMutation);
-    out.selectedResolutions[sourceIssue.id] = clone(resolution);
-    return attachCrossDay(out);
-  }
-
-  function applyResolution(transaction, resolutionId) {
-    var resolution = typeof resolutionId === 'object' ? resolutionId : resolutionById(transaction, resolutionId);
-    if (!resolution) throw new Error('Unknown resolution: ' + resolutionId);
-    if (transaction && Array.isArray(transaction.days) && transaction.beforeSchedules && transaction.afterSchedules) {
-      return applyCrossDayResolution(transaction, resolution);
-    }
-    var out = clone(transaction);
-    out.selectedResolutions = out.selectedResolutions || {};
-    var items = clone(transaction.afterSchedule.items);
-    var sourceIssue = transaction.issues.find(function (candidate) { return candidate.id === resolution.issueId; });
-    if (resolution.type === 'override_anchor' && sourceIssue && sourceIssue.type === 'anchor_violation') {
-      out.selectedResolutions[resolution.issueId] = clone(resolution);
-      return attachResolutions(out);
-    }
-    if (resolution.type === 'keep_gap' || resolution.type === 'accept_conflict') {
-      var acceptedIssue = sourceIssue;
-      var targetId = acceptedIssue && acceptedIssue.occurrenceIds[1];
-      var targetIndex = items.findIndex(function (item) { return item.id === targetId; });
-      if (targetIndex < 0) throw new Error('Accepted issue target is missing');
-      if (resolution.type === 'keep_gap') {
-        items[targetIndex].fine.intentionalGapBefore = true;
-      } else {
-        var previousId = acceptedIssue.occurrenceIds[0];
-        var acceptedWith = Array.isArray(items[targetIndex].fine.acceptedConflictWith) ? items[targetIndex].fine.acceptedConflictWith.slice() : [];
-        if (acceptedWith.indexOf(previousId) < 0) acceptedWith.push(previousId);
-        items[targetIndex].fine.acceptedConflictWith = acceptedWith;
-      }
-      var acceptanceReasons = mutationReasonMap(transaction.mutations);
-      acceptanceReasons[targetId] = resolution.type;
-      return rebuildAfterResolution(transaction, items, acceptanceReasons, resolution);
-    }
-
-    var index = items.findIndex(function (item) { return item.id === resolution.occurrenceId; });
-    if (index < 0) throw new Error('Resolution occurrence is missing: ' + resolution.occurrenceId);
-    var reasons = mutationReasonMap(transaction.mutations);
-    if (resolution.type === 'shorten') {
-      if (!canShorten(items[index], resolution.minutes)) throw new Error('Occurrence cannot be shortened safely');
-      items[index].fine.endAt = shiftIso(items[index].fine.endAt, -resolution.minutes);
-      reasons[items[index].id] = 'shorten';
-    } else if (resolution.type === 'relink_transport') {
-      var itemById = {};
-      items.forEach(function (item) { itemById[item.id] = item; });
-      function itemLabel(id) {
-        var item = itemById[id] || {};
-        return item.custom && item.custom.title || item.title || item.placeName || item.placeId || item.id || id;
-      }
-      items[index].transport = clone(items[index].transport || {});
-      items[index].transport.fromOccurrenceId = resolution.fromOccurrenceId;
-      items[index].transport.toOccurrenceId = resolution.toOccurrenceId;
-      items[index].transport.routeLabel = itemLabel(resolution.fromOccurrenceId) + ' → ' + itemLabel(resolution.toOccurrenceId);
-      reasons[items[index].id] = 'relink_transport';
-    } else if (resolution.type === 'push' && resolution.extendTravel) {
-      items[index].fine.endAt = shiftIso(items[index].fine.endAt, resolution.minutes);
-      reasons[items[index].id] = 'extend_travel';
-      var following = continuousMovableBlock({ items: items }, index + 1, { maxGapMin: transaction.rules && transaction.rules.maxContinuousGapMin });
-      var followingIds = {};
-      following.forEach(function (item) { followingIds[item.id] = true; });
-      items = items.map(function (item) {
-        if (!followingIds[item.id]) return item;
-        reasons[item.id] = 'push_after_travel';
-        return shifted(item, resolution.minutes);
-      });
-    } else {
-      var direction = resolution.type === 'connect' ? -1 : 1;
-      var block;
-      if (resolution.type === 'override_anchor') {
-        block = continuousMovableBlock({ items: items }, index, { maxGapMin: transaction.rules && transaction.rules.maxContinuousGapMin, allowFixedStart: true });
-      } else {
-        block = continuousMovableBlock({ items: items }, index, { maxGapMin: transaction.rules && transaction.rules.maxContinuousGapMin });
-      }
-      var ids = {};
-      block.forEach(function (item) { ids[item.id] = true; });
-      items = items.map(function (item) {
-        if (!ids[item.id]) return item;
-        reasons[item.id] = resolution.type;
-        return shifted(item, direction * resolution.minutes);
-      });
-    }
-    return rebuildAfterResolution(transaction, items, reasons, resolution);
-  }
-
-  function unresolvedBlockingIssues(transaction) {
-    return (transaction.issues || []).filter(function (issue) {
-      var requiresChoice = issue.severity === 'blocking' || issue.type === 'conflict';
-      return requiresChoice && (issue.status === 'new' || issue.status === 'worsened') && !issue.accepted;
-    });
-  }
-
   function reorderVersionDay(out, day) {
     var dayIndexes = [];
     var dayItems = [];
@@ -965,13 +505,6 @@
         throw stale;
       }
     });
-    var blocking = unresolvedBlockingIssues(transaction);
-    if (blocking.length && transaction.operation !== 'undo' && !(transaction.context && transaction.context.allowBlockingIssues)) {
-      var unresolved = new Error('Fineflow transaction still has unresolved blocking issues');
-      unresolved.code = 'FINEFLOW_UNRESOLVED_BLOCKING';
-      unresolved.issues = clone(blocking);
-      throw unresolved;
-    }
     var afterById = {};
     transaction.mutations.forEach(function (mutation) { afterById[mutation.occurrenceId] = clone(mutation.after); });
     var out = clone(version);
@@ -990,13 +523,6 @@
       var wrongVersion = new Error('Fineflow preview belongs to a different version');
       wrongVersion.code = 'FINEFLOW_STALE_BASE';
       throw wrongVersion;
-    }
-    var blocking = unresolvedBlockingIssues(transaction);
-    if (blocking.length && transaction.operation !== 'undo' && !(transaction.context && transaction.context.allowBlockingIssues)) {
-      var unresolved = new Error('Fineflow transaction still has unresolved blocking issues');
-      unresolved.code = 'FINEFLOW_UNRESOLVED_BLOCKING';
-      unresolved.issues = clone(blocking);
-      throw unresolved;
     }
     var current = buildDaySchedule(version, transaction.day, { timeZone: transaction.beforeSchedule && transaction.beforeSchedule.timeZone || 'Asia/Bangkok' });
     if (baseFingerprint(current) !== transaction.baseFingerprint) {
@@ -1034,9 +560,6 @@
       var inverseMutations = transaction.mutations.map(function (mutation) {
         return { occurrenceId: mutation.occurrenceId, before: clone(mutation.after), after: clone(mutation.before), reason: 'undo_' + mutation.reason };
       });
-      var inverseMain = inverseMutations.find(function (mutation) {
-        return mutation.occurrenceId === transaction.mutations[0].occurrenceId;
-      });
       var inverse = {
         id: transaction.id + '_undo',
         operation: 'undo',
@@ -1049,15 +572,11 @@
         baseFingerprint: fingerprints[transaction.targetDay],
         baseFingerprints: fingerprints,
         mutations: inverseMutations,
-        issues: crossDayIssues(currentSchedules, transaction.beforeSchedules, transaction.days, transaction.contextByDay || {}, transaction.rules || {}, inverseMain),
-        selectedResolutions: {},
         summary: null,
         beforeSchedule: clone(currentSchedules[transaction.targetDay]),
         afterSchedule: clone(transaction.beforeSchedules[transaction.sourceDay]),
         beforeSchedules: clone(currentSchedules),
         afterSchedules: clone(transaction.beforeSchedules),
-        context: clone(transaction.context || {}),
-        contextByDay: clone(transaction.contextByDay || {}),
         rules: clone(transaction.rules || {}),
         planOrderBefore: appliedVersion.plan.map(function (item) { return item && item.id; }),
         restorePlanOrder: clone(transaction.planOrderBefore || null)
@@ -1074,14 +593,13 @@
       mutations: transaction.mutations.map(function (mutation) {
         return { occurrenceId: mutation.occurrenceId, before: clone(mutation.after), after: clone(mutation.before), reason: 'undo_' + mutation.reason };
       }),
-      issues: detectScheduleIssues(current, transaction.beforeSchedule, transaction.context || {}),
-      selectedResolutions: {},
+      summary: null,
       beforeSchedule: clone(current),
       afterSchedule: clone(transaction.beforeSchedule),
-      context: clone(transaction.context || {}),
       rules: clone(transaction.rules || {})
     };
-    return attachResolutions(inverse);
+    inverse.summary = summaryFor(inverse);
+    return inverse;
   }
 
   var api = {
@@ -1095,13 +613,9 @@
     previewCrossDayChange: previewCrossDayChange,
     previewRippleChange: previewRippleChange,
     previewSwap: previewSwap,
-    detectScheduleIssues: detectScheduleIssues,
-    suggestResolutions: suggestResolutions,
-    applyResolution: applyResolution,
     applyTransaction: applyTransaction,
     continuousMovableBlock: continuousMovableBlock,
     findFixedAnchor: findFixedAnchor,
-    classifyTransportOccurrence: classifyTransportOccurrence,
     baseFingerprint: baseFingerprint,
     fingerprintSchedule: baseFingerprint,
     invertTransaction: invertTransaction

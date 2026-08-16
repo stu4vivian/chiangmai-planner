@@ -404,7 +404,7 @@
         manualOrder: index
       },
       scheduleKind: isCustom ? 'custom' : 'place',
-      transport: null,
+      travelMode: '',
       todos: todos,
       category: text(item.category) || (source.place && text(source.place.type)) || '其他',
       notes: text(item.notes),
@@ -446,33 +446,6 @@
     };
   }
 
-  function issueSummary(version, occurrences, timeZone, fineflow) {
-    if (!fineflow || typeof fineflow.buildDaySchedule !== 'function' || typeof fineflow.detectScheduleIssues !== 'function') return [];
-    var byDay = {};
-    occurrences.forEach(function (occurrence) {
-      (byDay[occurrence.day] || (byDay[occurrence.day] = [])).push(occurrence);
-    });
-    var issues = [];
-    Object.keys(byDay).sort().forEach(function (day) {
-      var before = fineflow.buildDaySchedule(version, day, { timeZone: timeZone });
-      var previewVersion = clone(version);
-      var replacements = {};
-      byDay[day].forEach(function (occurrence) { replacements[occurrence.id] = occurrence; });
-      previewVersion.plan = (previewVersion.plan || []).map(function (entry) {
-        if (!replacements[entry.id]) return entry;
-        var replacement = replacements[entry.id];
-        delete replacements[entry.id];
-        return clone(replacement);
-      });
-      Object.keys(replacements).forEach(function (id) { previewVersion.plan.push(clone(replacements[id])); });
-      var after = fineflow.buildDaySchedule(previewVersion, day, { timeZone: timeZone });
-      fineflow.detectScheduleIssues(before, after, {}).forEach(function (issue) {
-        issues.push(Object.assign({ day: day }, clone(issue)));
-      });
-    });
-    return issues;
-  }
-
   function dryRunImport(payload, options) {
     options = options || {};
     var core = options.core || defaultCore;
@@ -493,7 +466,6 @@
       skipped: [],
       warnings: [],
       occurrences: [],
-      conflicts: [],
       transaction: null,
       canApply: false
     };
@@ -542,7 +514,6 @@
       });
     });
 
-    result.conflicts = issueSummary(version, result.occurrences, payload.tripTimeZone, fineflow);
     if (changes.length) {
       result.transaction = {
         id: options.transactionId || 'ffi_import_' + hash(changes.map(function (change) { return change.externalId; }).join('|')),
@@ -553,14 +524,12 @@
         baseFingerprint: fineflow.baseFingerprint(version.plan),
         tripTimeZone: payload.tripTimeZone,
         changes: changes,
-        issues: clone(result.conflicts),
         summary: {
           add: changes.filter(function (change) { return change.type === 'add-occurrence'; }).length,
           update: changes.filter(function (change) { return change.type === 'update-occurrence'; }).length,
           skipped: result.skipped.length,
           needsInput: result.needsInput.length,
-          errors: result.errors.length,
-          conflicts: result.conflicts.filter(function (issue) { return issue.type === 'conflict'; }).length
+          errors: result.errors.length
         }
       };
     }

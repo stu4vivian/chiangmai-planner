@@ -142,7 +142,9 @@
   .ovt-blocklab{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:14px 4px 6px;}
   .ovt-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;}
   .ovt-wrap:not(:last-child){margin-bottom:16px;}   /* 每一大排（週）之間多一點點留白（Vivian #3） */
-  .ovg{display:grid;align-content:start;column-gap:16px;width:max-content;padding:2px 0 4px;}
+  /* width:max-content 會讓 7 天固定 120px 的表格在寬螢幕右邊留一大片空白。
+     改成 min-width:max-content：窄視窗照舊保底 120px 並右滑，寬視窗讓欄平均撐滿（見下方 minmax）。 */
+  .ovg{display:grid;align-content:start;column-gap:16px;padding:2px 0 4px;}
   .ovg-cap{position:sticky;left:0;z-index:3;background:var(--surface);}
   .ovg-hd{display:flex;flex-direction:column;align-items:flex-start;padding:7px 0 10px;box-shadow:inset 0 -1px 0 var(--line);}   /* V1 兩排：日期列＋地區列（Vivian #3#4） */
   .ovg-hd .dhd{font-size:17px;font-weight:600;color:var(--ink);letter-spacing:-.01em;line-height:1.15;}   /* 8/29 都一樣大（Vivian） */
@@ -827,7 +829,7 @@
   .ff-back{width:34px;height:34px;padding:0;font-size:17px;}
   .ff-retry{padding:9px 15px;margin-top:10px;}
   .ff-add:active,.ff-back:active,.ff-retry:active{background:var(--surface-2);}
-  .ff-add:focus-visible,.ff-back:focus-visible,.ff-retry:focus-visible,.ff-item:focus-visible,.ff-day-open:focus-visible,.ff-todo-link:focus-visible,.ff-modes button:focus-visible,.ff-resolutions button:focus-visible,.ff-sheet-actions button:focus-visible,.ff-todo-row:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+  .ff-add:focus-visible,.ff-back:focus-visible,.ff-retry:focus-visible,.ff-item:focus-visible,.ff-day-open:focus-visible,.ff-todo-link:focus-visible,.ff-modes button:focus-visible,.ff-sheet-actions button:focus-visible,.ff-todo-row:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
 
   .ff-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:18px;}
   .ff-overview>div,.ff-overview>button{min-width:0;padding:10px 8px 9px;border:0;border-right:1px solid var(--line);background:#fff;text-align:left;font-family:inherit;}
@@ -857,14 +859,9 @@
   .ff-time{align-self:center;display:flex;flex-direction:column;font-variant-numeric:tabular-nums;}
   .ff-time b{font-size:12.5px;line-height:1.1;font-weight:700;}
   .ff-time small{font-size:9px;line-height:1.1;color:var(--faint);margin-top:3px;white-space:nowrap;}
-  .ff-mark{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;line-height:1;}
-  .ff-mark.connector_travel{font-size:15px;color:#4c6cb3;}
-  .ff-mark.booked_transport,.ff-mark.flight{color:var(--danger);}
   .ff-item-main{display:block;min-width:0;}
   .ff-item-title{display:block;min-width:0;font-size:13px;line-height:1.25;font-weight:600;overflow-wrap:anywhere;}
   .ff-item-meta{display:flex;align-items:center;gap:5px;min-width:0;font-size:9.5px;line-height:1.25;color:var(--faint);margin-top:3px;}
-  .ff-route{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .ff-route::before{content:'・';}
   .ff-item-flags{display:flex;align-items:center;justify-content:flex-end;gap:4px;min-width:0;}
   .ff-tag{display:inline-flex;align-items:center;min-height:19px;padding:2px 5px;border-radius:5px;background:var(--surface-2);color:var(--muted);font-size:8.5px;font-weight:700;white-space:nowrap;}
   .ff-tag.fixed{background:#f3eee8;color:#735f48;}
@@ -897,8 +894,23 @@
   .ff-current .ff-kicker{grid-column:1/-1;margin-bottom:3px;}
   .ff-current b{font-size:14px;min-width:0;overflow-wrap:anywhere;}
   .ff-current small{font-size:10px;color:var(--muted);text-align:right;}
-  .ff-time-fields{display:grid;grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr);gap:6px;align-items:end;margin-bottom:12px;}
-  .ff-time-fields>span{align-self:center;text-align:center;color:var(--faint);padding-top:17px;}
+  /* 開始／結束各自佔滿寬度的橫向滑動選擇器→上下堆疊（原本三欄 grid 的 → 換成中間的時長小字）。 */
+  .ff-time-fields{display:block;margin-bottom:12px;}
+  .ff-time-span{margin:5px 0;text-align:center;font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums;}
+  .ff-timepick{display:block;min-width:0;}
+  .ff-timepick-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 5px;}
+  .ff-timepick-head>span{font-size:10.5px;font-weight:700;color:var(--muted);}
+  .ff-timepick-head>b{font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
+  .ff-timepick-rails{--tp-item:56px;position:relative;border:1px solid var(--line);border-radius:var(--r-md);background:#fff;overflow:hidden;}
+  /* 貫穿時／分兩列的中央窗口；pointer-events 一定要關，否則會吃掉點格子的點擊。 */
+  .ff-timepick-window{position:absolute;left:50%;transform:translateX(-50%);top:3px;bottom:3px;width:var(--tp-item);border:1px solid var(--ink);border-radius:var(--r-sm);pointer-events:none;}
+  .ff-timepick-rail{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x;scrollbar-width:none;scroll-behavior:auto;}
+  .ff-timepick-rail::-webkit-scrollbar{display:none;}
+  .ff-timepick-rail:focus-visible{outline:0;background:rgba(28,28,32,.04);}
+  /* 頭尾兩格也要能滾到中央＝左右各補半個視窗寬。 */
+  .ff-timepick-track{display:flex;padding-inline:calc(50% - var(--tp-item)/2);}
+  .ff-timepick-track>button{flex:0 0 var(--tp-item);min-height:44px;scroll-snap-align:center;border:0;background:transparent;padding:0;font:16px var(--ff);font-variant-numeric:tabular-nums;color:var(--faint);cursor:pointer;}
+  .ff-timepick-track>button[aria-selected="true"]{color:var(--ink);font-weight:700;}
   .ff-field{display:block;min-width:0;margin:0 0 11px;}
   .ff-field>span{display:block;font-size:10.5px;font-weight:700;color:var(--muted);margin:0 0 5px;}
   .sheet .ff-field input,.sheet .ff-field select,.sheet .ff-field textarea{width:100%;min-width:0;min-height:44px;margin:0;border:1px solid var(--line);border-radius:9px;padding:9px 10px;background:#fff;color:var(--ink);font:16px var(--ff);font-variant-numeric:tabular-nums;}
@@ -923,7 +935,6 @@
   .ff-source-card>small{font-size:10px;line-height:1.4;color:var(--muted);}
   .ff-editor-section{margin:17px 0 0;padding-top:14px;border-top:.5px solid var(--line);}
   .ff-editor-section>h4{margin:0 0 9px;font-size:11px;color:var(--ink2);}
-  .ff-transport-fields{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);}
   .ff-card-map-preview{display:flex;align-items:center;min-height:40px;margin:0 0 11px;padding:8px 10px;border-radius:9px;background:#eef3fb;color:#315f9f;font-size:11px;font-weight:700;text-decoration:none;}
   .ff-preview-state{padding:18px 10px;border-radius:9px;background:var(--surface-2);color:var(--muted);font-size:12px;text-align:center;}
   .ff-preview-state.error{background:#f9e9e7;color:var(--danger);}
@@ -944,19 +955,10 @@
   .ff-change-head>div{flex:1;min-width:0;}
   .ff-change-head b{display:block;font-size:14px;margin-top:2px;}
   .ff-change-head>span{font-size:10.5px;font-weight:700;color:var(--muted);white-space:nowrap;}
-  .ff-section-title{font-size:11px;font-weight:800;color:var(--ink2);margin:12px 0 6px;}
-  .ff-issue{display:grid;grid-template-columns:23px minmax(0,1fr);gap:8px;padding:10px 0;border-bottom:.5px solid var(--line);}
-  .ff-issue-no{width:21px;height:21px;display:grid;place-items:center;border-radius:50%;background:#f9e9e7;color:var(--danger);font-size:10px;font-weight:800;}
-  .ff-issue.info .ff-issue-no{background:var(--surface-2);color:var(--muted);}
-  .ff-issue.resolved .ff-issue-no{background:#e5f1e9;color:var(--ok);}
-  .ff-issue-head{display:flex;align-items:baseline;gap:7px;}
-  .ff-issue-head b{font-size:12.5px;}
-  .ff-issue-head span{font-size:9px;font-weight:700;color:var(--faint);}
-  .ff-issue p{font-size:10.5px;line-height:1.4;color:var(--muted);margin:3px 0 7px;}
-  .ff-resolutions{display:flex;flex-wrap:wrap;gap:5px;}
-  .ff-resolutions button{border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink2);padding:6px 8px;font-family:inherit;font-size:10px;font-weight:700;cursor:pointer;text-align:left;}
-  .ff-resolutions button.recommended{border-color:var(--ink);background:var(--ink);color:#fff;}
-  .ff-unresolved{display:block;font-size:10px;color:var(--danger);}
+  /* 營業時間提醒：講事實的醒目紅字（沿用 --danger 錯誤色，不另開新色） */
+  .ff-hours-warning{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:10px 0 2px;padding:10px 11px;border-radius:9px;background:#f9e9e7;color:var(--danger);font-size:12.5px;font-weight:800;line-height:1.4;}
+  .ff-hours-warning b{font-size:12.5px;font-weight:800;}
+  .ff-hours-warning span{font-size:12.5px;font-weight:800;}
   .ff-no-issue{margin-top:12px;padding:10px 11px;border-radius:9px;background:#eaf3ed;color:var(--ok);font-size:11px;font-weight:700;}
   .ff-mutations{margin-top:10px;border-top:.5px solid var(--line);}
   .ff-mutations summary{padding:11px 0;font-size:11px;font-weight:700;color:var(--ink2);cursor:pointer;}
@@ -995,6 +997,7 @@
     .ff-day{margin-bottom:26px;}
     .ff-item{grid-template-columns:62px 24px minmax(0,1fr) auto;gap:10px;padding:8px 0;}
     .ff-item-title{font-size:13.5px;}
+    .ff-timepick-rails{--tp-item:64px;}   /* 桌機格子放大；snap 保留＝滑鼠點格子仍然自動對中 */
   }
 
   @media(min-width:1100px){
@@ -1134,6 +1137,9 @@
   }
   .ff-cal-slot:nth-child(even){border-bottom-color:#e7e7e9;}
   .ff-cal-slot:active{background:rgba(88,152,240,.08);}
+  /* 退出解鎖態的那一下 click 已被吃掉，格子就不該閃——閃了會讓人以為真的點到（Vivian）。 */
+  body.ff-disarming .ff-cal-slot:active,body.ff-disarming .ff-cal-card-main:active{background:none;}
+  body.ff-disarming{-webkit-tap-highlight-color:transparent;}
   .ff-cal-slot:focus-visible{z-index:2;outline:2px solid #5898f0;outline-offset:-2px;}
   .ff-cal-slot,.ff-cal-card-main{
     touch-action:pan-x pan-y;
@@ -1141,6 +1147,9 @@
     -webkit-user-select:none;
     -webkit-touch-callout:none;
   }
+  /* 注意：WebKit 在手勢「開始時」就鎖定 touch-action，手勢進行中才改 class 是無效的。
+     底下 body.ff-pointer-active 這組只當保險，真正的鎖捲是 app-6-fineflow.js 檔尾那個
+     {passive:false} 的 touchmove preventDefault()。 */
   body.ff-pointer-active .ff-cal-scroll{overscroll-behavior:none;scroll-behavior:auto;}
   body.ff-pointer-active .ff-cal-slot,
   body.ff-pointer-active .ff-cal-card-main,
@@ -1189,7 +1198,6 @@
   .ff-cal-card-map-link{position:absolute;right:4px;bottom:4px;z-index:3;min-width:24px;min-height:24px;display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:7px;background:rgba(255,255,255,.9);color:inherit;font-size:12px;line-height:1;text-decoration:none;box-shadow:0 1px 4px rgba(20,20,35,.12);}
   .ff-cal-card-map-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
   .ff-cal-card-flags{position:absolute;right:3px;top:3px;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;font-size:8px;line-height:1;white-space:nowrap;}
-  .ff-cal-conflict{flex:none;width:13px;height:13px;display:grid;place-items:center;border-radius:50%;background:var(--danger);color:#fff;font-size:9px;font-weight:800;}
   .ff-cal-progress,.ff-cal-meta-icon{flex:none;font-size:8px;font-weight:750;opacity:.8;}
   .ff-cal-card-todo-summary{
     flex:none;
@@ -1218,21 +1226,24 @@
   .ff-cal-card.density-small .ff-cal-card-map-link{display:none;}
   .ff-cal-card.density-small .ff-cal-card-title{display:block;height:14px;margin:0;overflow:hidden;font-size:9px;line-height:14px;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal;}
   .ff-cal-card.density-small .ff-cal-card-flags{position:absolute;right:2px;top:2px;margin:0;}
-  .ff-cal-card.density-small .ff-cal-card-flags>*:not(.ff-cal-conflict){display:none;}
+  .ff-cal-card.density-small .ff-cal-card-flags>*{display:none;}
   .ff-cal-card.density-medium .ff-cal-card-title{-webkit-line-clamp:1;}
   .ff-cal-card.density-medium .ff-cal-card-note{-webkit-line-clamp:2;}
   .ff-cal-card.density-medium .ff-cal-card-todo-summary{display:none;}
   .ff-cal-card.density-large .ff-cal-card-note{-webkit-line-clamp:3;}
   .ff-cal-card.density-large .ff-cal-card-flags{flex-wrap:wrap;overflow:visible;}
   .ff-cal-card.is-fixed .ff-cal-card-main{padding-right:5px;}
-  .ff-cal-card.is-conflict{outline:2px solid #c84a4a;outline-offset:-1px;box-shadow:0 2px 6px rgba(181,69,69,.18);}
+  .ff-cal-card.is-hours-warning{outline:2px solid #c84a4a;outline-offset:-1px;box-shadow:0 2px 6px rgba(181,69,69,.18);}
+  .ff-cal-card-hours{display:block;color:var(--danger);font-size:10px;font-weight:800;line-height:1.25;overflow-wrap:anywhere;}
   .ff-cal-card.is-selected{z-index:12;outline:2px solid var(--ink);outline-offset:1px;box-shadow:0 5px 14px rgba(20,20,35,.2);}
-  .ff-cal-card.is-conflict.is-selected{box-shadow:inset 0 0 0 2px #c84a4a,0 5px 14px rgba(20,20,35,.2);}
+  .ff-cal-card.is-hours-warning.is-selected{box-shadow:inset 0 0 0 2px #c84a4a,0 5px 14px rgba(20,20,35,.2);}
   .ff-cal-card.is-preview{z-index:11;border-style:dashed;opacity:.82;box-shadow:0 5px 16px rgba(20,20,35,.14);}
   .ff-cal-card.is-pointer-origin{opacity:.34;filter:saturate(.55);}
   .ff-cal-pointer-ghost{
     position:absolute;
     z-index:20;
+    top:0;
+    will-change:transform;
     left:2px;
     right:2px;
     min-height:44px;
@@ -1300,8 +1311,33 @@
   .ff-cal-card-main:focus-visible,.ff-cal-drag-handle:focus-visible,.ff-cal-resize:focus-visible,.ff-cal-toolbar>button:focus-visible,.ff-cal-unscheduled:focus-visible,.ff-cal-fab:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
 
   @media (pointer:coarse){
-    .ff-cal-drag-handle,.ff-cal-resize{display:none!important;pointer-events:none!important;}
+    /* 手機平常一條輔助標誌都不畫（Vivian：「不畫那些輔助標誌但可以使用」）。
+       模仿 iOS 內建行事曆：長按整張卡 350ms → 放開 → 只有那張卡進 is-armed 才長出上下把手。
+       桌機 hover 那套不受影響。 */
+    .ff-cal-drag-handle,.ff-cal-resize{display:none;}
+    /* 手機欄寬只有 ~92px：預覽框原本硬撐 min-height:44px（比半小時的卡還高）＋第二行印
+       「日期・行程名稱」（實測需 156px、只有 78px 可用）＝爆框又蓋住底下資訊（Vivian 連兩次回報）。
+       拖曳中她知道自己在拖什麼，只留時間就夠；left/width 跟卡片同一組，不會比原卡胖一圈。 */
+    .ff-cal-pointer-ghost{min-height:0;padding:2px 5px;gap:0;border-width:1.5px;border-radius:7px;justify-content:center;left:1.5%;right:auto;width:92%;}
+    .ff-cal-pointer-ghost strong{display:none;}
+    .ff-cal-pointer-ghost .ff-cal-pointer-time{font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    /* 命中區 44×44（Apple HIG）；但卡片比 44px 還矮時（45 分鐘的卡只有 36px）兩個把手會互相重疊，
+       重疊帶會由後畫的「結束」把手吃掉點擊＝拖到錯的一端，所以高度以卡片高為上限。 */
+    .ff-cal-card.is-armed{z-index:16;outline:2px solid #4f7fe5;outline-offset:1px;box-shadow:0 6px 18px rgba(36,73,145,.26);overflow:visible;--ff-handle:min(44px,max(20px,var(--ff-height,44px) - 6px));}
+    /* 把手是「上一次手勢結束後」才 render 出來的，所以 touch-action:none 的鎖定時機合法＝按下即拖，
+       不必再長按一次。 */
+    .ff-cal-card.is-armed .ff-cal-resize{display:block;width:44px;height:var(--ff-handle);touch-action:none;}
+    .ff-cal-card.is-armed .ff-cal-resize-start{top:calc(var(--ff-handle) / -2);}
+    .ff-cal-card.is-armed .ff-cal-resize-end{bottom:calc(var(--ff-handle) / -2);}
+    .ff-cal-card.is-armed .ff-cal-resize::after{top:calc(50% - 2px);left:6px;right:6px;height:4px;background:#4f7fe5;}
   }
+
+  /* 長按等待期間：350ms 的漸進縮小＝「還在數秒」的連續回饋（iOS Safari 沒有震動可用，只能靠視覺）。
+     時間要跟 POINTER_LONG_PRESS_MS 對齊，動畫走完＝手勢成立。 */
+  .ff-cal-card.is-pressing{transform:scale(.97);box-shadow:0 0 0 2px rgba(79,127,229,.5),0 3px 10px rgba(36,73,145,.16);transition:transform .35s cubic-bezier(.2,0,.4,1),box-shadow .35s cubic-bezier(.2,0,.4,1);}
+  /* 觸發瞬間：一次明顯的跳變（浮起＋深陰影），接在連續變化之後才讀得出「進來了」。 */
+  .ff-cal-card.is-lifted{transform:scale(1.02);box-shadow:0 10px 22px rgba(20,20,35,.32);transition:transform .12s ease,box-shadow .12s ease;}
+  .ff-cal-card.is-pointer-origin.is-lifted{opacity:.5;}
 
   .ff-cal-empty{
     position:absolute;
@@ -1428,6 +1464,8 @@
     .ff-cal-card-flags,.ff-cal-progress,.ff-cal-meta-icon{font-size:9px;}
     .ff-cal-card-todo-summary{font-size:9.5px;}
     .ff-cal-date-viewport,.ff-cal-days-viewport{overflow-x:hidden;scroll-snap-type:none;touch-action:pan-y;}
+    /* 手機維持 pan-y＝平常上下捲照常；長按進拖之後靠 JS 的 touchmove preventDefault 鎖捲，
+       不要指望這裡改 touch-action（見上方註解）。 */
     .ff-cal-slot,.ff-cal-card-main{touch-action:pan-y;}
   }
 

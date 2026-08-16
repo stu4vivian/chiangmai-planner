@@ -164,6 +164,7 @@ document.addEventListener('click',e=>{
   if(a==='arm-cancel'){ disarm(); return; }                            // 待命橫幅「取消」（spec §7）
   // ── 檢視卡 detailSheet（Task 16）動作列 ──
   if(a==='detail-assign'){ armPlace(t.dataset.id); return; }
+  if(a==='detail-map'){ mapSpotlight(t.dataset.id); return; }   // 🗺️ 地圖看它：地圖收合時 mapSpotlight 會自己展開再亮點（app-1 L260）
   if(a==='detail-edit'){ openEdit(t.dataset.id); return; }
   // （qa-place / qa-occupied handler 已隨 openAssign 面板退役；放入/移格改走 dropInto，撞格走 openOccupiedMenu，見 app-2）
   if(a==='om-both'||a==='om-pk'||a==='om-swap'){ const s=sh.dataset, day=s.omDay, slot=s.omSlot, pid=s.omPid;
@@ -251,6 +252,7 @@ document.addEventListener('click',e=>{
       losers.forEach(l=>{ const current=plan.find(x=>x.id===l.id); if(current) current.slot=l.slot; else plan.push(Object.assign({},l)); });
       if(wasPk) CNXCore.setSlotFlag(av(),day,slot,'pk',true);                                   // 還原 2選1 旗標
       afterChange(); }}); return; }
+  if(a==='op-map'){ const eid=sh.dataset.opEid, en=plan.find(x=>x.id===eid); if(en){ closeSheet(); mapSpotlight(en.placeId); } return; }   // 🗺️ 地圖看它 → 關面板再 spotlight（地圖沒開會自己展開）
   if(a==='op-edit'){ const eid=sh.dataset.opEid, en=plan.find(x=>x.id===eid); if(!en) return; openEdit(en.placeId); return; }   // 已排面板→編輯卡；存檔/取消後自動回換將中心（openSheet 巢狀返回）
   if(a==='cleartent'){ CNXCore.setSlotFlag(av(), t.dataset.day, t.dataset.slot, 'tentative', false); afterChange(); return; }   // 同上：afterChange 已就地重繪
   if(a==='openbase'){ openBase(); return; }

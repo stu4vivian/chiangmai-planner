@@ -90,9 +90,16 @@ function resetOverlayNavigation(){
   navStack.length=0; curReopen=null; curKey=null;
   if(window.CNXFineFlowUI&&typeof window.CNXFineFlowUI.resetTransient==='function') window.CNXFineFlowUI.resetTransient();
 }
+// 原地重繪（同 key）時捲動位置要留著：sh.innerHTML 整段重建會把 scrollTop 歸零，
+// 使用者按個 checkbox 就被彈回最上面。捲動容器可能是 sh 自己或內層 .ff-sheet-scroll，兩個都存。
+function sheetScrollBox(){ return sh.querySelector('.ff-sheet-scroll'); }
 function openSheet(html, reopen, key){
+  const samePlace = key && key===curKey, box = samePlace && sheetScrollBox();
+  const keepOuter = samePlace ? sh.scrollTop : 0, keepInner = box ? box.scrollTop : 0;
   if(document.body.classList.contains('sheet-open') && curReopen && key!==curKey) navStack.push(curReopen);   // 在父層上開「不同的」子窗→自動記住回父層（同 key＝原地重繪不記；父層自己登記 curReopen，任何子窗都涵蓋、不漏）
   sh.classList.remove('sheet-edit','sheet-picker','pk2','tall','sheet-cfg'); document.body.classList.remove('cardpeek','peek-edit'); ['pkDay','pkSlot','pkMode','omPid','omMove','omDay','omSlot','opEid','dsPid','dsMove','wkKind','wkKey','emCat'].forEach(k=>delete sh.dataset[k]); sh.innerHTML='<button class="sheetclose" data-action="close" aria-label="關閉">✕</button>'+html; ov.classList.add('on'); document.body.classList.add('sheet-open');
+  if(samePlace){ sh.scrollTop=keepOuter; const nb=sheetScrollBox(); if(nb) nb.scrollTop=keepInner; }
+  if(window.CNXFineFlowUI&&typeof window.CNXFineFlowUI.initTimePickers==='function'&&sh.querySelector('[data-ff-timepick]')) window.CNXFineFlowUI.initTimePickers(sh);   // 滑動時間選擇器的 listener 每次 innerHTML 都被清掉，統一在這裡接回來（同 resetTransient 的 hook 模式）
   curReopen=reopen||null; curKey=key||null;   // 登記「怎麼重開現在這個畫面」（過場/葉子不傳＝不可被返回）
 }
 // ↑ 每次開新 sheet 先清 co-view class：看卡/編輯/占用面板會在 openSheet 後再由 autoSpot 重加；其餘 sheet（排入/挑選器…）保持正常深背景、正常高度（修：從卡片開排入/掛備案時 cardpeek 殘留樣式）。抽屜還原/spotlight 清除仍由 closeSheet→exitCardPeek（看 prevDrawerState，非 class）負責。
@@ -153,6 +160,7 @@ function openOccPanel(eid){
       ${memo?`<div>💬 ${esc(memo)}</div>`:''}
     </div>
     <div class="op-acts">
+      <span class="oa" data-action="op-map">🗺️ 地圖</span>
       <a class="oa" href="${esc(gmaps(p))}" target="_blank" rel="noopener">📍 Maps</a>
       <span class="oa" data-action="op-move">↪ 改時間</span>
       <span class="oa" data-action="op-edit">✎ 編輯</span>
@@ -242,6 +250,7 @@ function detailSheet(id){
     <div class="op-sched${sc.length?'':' none'}">${schedTxt}</div>
     <div class="op-acts">
       <span class="oa pri" data-action="detail-assign" data-id="${p.id}">📅 排入</span>
+      <span class="oa" data-action="detail-map" data-id="${p.id}">🗺️ 地圖</span>
       <a class="oa" href="${esc(gmaps(p))}" target="_blank" rel="noopener">📍 Maps</a>
       <span class="oa" data-action="detail-edit" data-id="${p.id}">✎ 編輯</span>
     </div>

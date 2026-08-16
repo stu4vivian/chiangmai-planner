@@ -10,6 +10,7 @@
     day: null,
     anchorDate: null,
     selectedId: null,
+    armedId: null,          // 手機「長按解鎖」的那一張卡：只有它會長出上下把手（selectedId＝選取，語意不同）
     createDraft: null,
     importPreview: null,
     editor: null,
@@ -104,6 +105,213 @@
     return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
   }
 
+  // ── 橫向滑動時間選擇器 ─────────────────────────────────────────────────
+  // 為什麼不是 <input type="time">：手機上要點到分鐘、一分一分轉，且會叫出系統滾輪。
+  // 這裡改成「時／分兩條橫軌 + 中央窗口 + 原生 scroll-snap」，分鐘以 TIME_STEP 為單位。
+  //
+  // 兩條鐵則（別破壞）：
+  //  1. 元件不持有自身狀態。畫面 100% 由 state.editor / state.createDraft 推導——openSheet 每次都
+  //     整段 innerHTML 重建，元件自己記的東西都會被清掉。所有暫存旗標一律寫在 dataset 上。
+  //  2. 滑動途中絕不寫資料。改時間會排 runPreview（100ms）→ renderEditor → openSheet 全量重建；
+  //     若在手指還沒離開時提交，DOM 會被抽換 → 手勢中斷、位置亂跳。只有落定（scrollend／120ms）才提交。
+  //
+  // 相容層：每個選擇器內留一個 <input type="hidden" data-ff-…>，沿用原本的屬性名。
+  // 既有的 document 委派（改開始→平移結束→重算 coarseSlot→排 preview）與建立流程讀值全部不用改。
+  // type="hidden" 不可聚焦 → iOS 不會放大、也不會叫出系統滾輪。
+  // 注意：hidden input 改 .value 不會自動觸發 input，必須先寫 value 再手動 dispatch。
+  var TIME_STEP = 5;
+  var TIME_MINUTE_COUNT = 60 / TIME_STEP;
+  var timePickFocusMemo = null;   // 鍵盤操作後浮層會重建、焦點會掉；記住最後一次按鍵的軌道，重建後補回
+
+  function padTwo(value) { return String(value).padStart(2, '0'); }
+
+  function timePickIndexes(value) {
+    var text = /^\d{1,2}:\d{2}$/.test(value || '') ? value : '09:00';
+    return {
+      hour: clamp(+text.slice(0, 2) || 0, 0, 23),
+      // 非 TIME_STEP 倍數的舊資料（例如 09:07）只決定「軌道停在哪一格」，不會回寫 data-value
+      minute: clamp(Math.round(+text.slice(3, 5) / TIME_STEP), 0, TIME_MINUTE_COUNT - 1)
+    };
+  }
+
+  function timePickRail(el, unit) { return el.querySelector('.ff-timepick-rail[data-unit="' + unit + '"]'); }
+  function timePickItems(rail) { return (rail && rail.firstElementChild && rail.firstElementChild.children) || []; }
+
+  function timePickItemWidth(rail) {
+    var first = timePickItems(rail)[0];
+    if (!first) return 0;
+    return first.offsetWidth || (first.getBoundingClientRect && first.getBoundingClientRect().width) || 0;
+  }
+
+  // aria-selected 是這個元件唯一的「目前選到哪格」真相：捲動時由 scrollLeft 換算後寫進去，提交時再讀回來。
+  function timePickSelected(rail) {
+    var items = timePickItems(rail);
+    for (var i = 0; i < items.length; i++) if (items[i].getAttribute('aria-selected') === 'true') return i;
+    return 0;
+  }
+
+  function timePickMark(rail, index) {
+    var items = timePickItems(rail);
+    for (var i = 0; i < items.length; i++) items[i].setAttribute('aria-selected', i === index ? 'true' : 'false');
+  }
+
+  function timePickCurrent(el) {
+    var hourRail = timePickRail(el, 'hour'), minuteRail = timePickRail(el, 'minute');
+    if (!hourRail || !minuteRail) return '';
+    return padTwo(timePickSelected(hourRail)) + ':' + padTwo(timePickSelected(minuteRail) * TIME_STEP);
+  }
+
+  function timePickReadout(el, text) {
+    var readout = el.querySelector('[data-tp-readout]');
+    if (readout) readout.textContent = text;
+  }
+
+  // 純視覺定位：把兩條軌推到 value 對應的格子。不寫 state、不發事件。
+  // 回傳 false ＝此刻量不到格寬（浮層還沒 layout），呼叫端用 rAF 再試一次。
+  function timePickPlace(el, value) {
+    var indexes = timePickIndexes(value), placed = true;
+    [['hour', indexes.hour], ['minute', indexes.minute]].forEach(function (pair) {
+      var rail = timePickRail(el, pair[0]);
+      if (!rail) { placed = false; return; }
+      timePickMark(rail, pair[1]);
+      var width = timePickItemWidth(rail);
+      if (width > 0) rail.scrollLeft = pair[1] * width; else placed = false;
+    });
+    el.dataset.tpQuiet = String(Date.now() + 200);   // 程式化捲動會回彈出額外 scroll 事件，靜音一小段避免自我提交迴圈
+    timePickReadout(el, value);
+    return placed;
+  }
+
+  function renderTimePicker(attr, value, label) {
+    var indexes = timePickIndexes(value), hours = '', minutes = '', i;
+    for (i = 0; i < 24; i++) hours += '<button type="button" role="option" tabindex="-1" data-index="' + i + '" aria-selected="' + (i === indexes.hour) + '">' + padTwo(i) + '</button>';
+    for (i = 0; i < TIME_MINUTE_COUNT; i++) minutes += '<button type="button" role="option" tabindex="-1" data-index="' + i + '" aria-selected="' + (i === indexes.minute) + '">' + padTwo(i * TIME_STEP) + '</button>';
+    return '<div class="ff-timepick" data-ff-timepick="' + h(attr) + '" data-value="' + h(value) + '">' +
+      '<div class="ff-timepick-head"><span>' + h(label) + '</span><b data-tp-readout>' + h(value) + '</b></div>' +
+      '<input type="hidden" ' + attr + ' value="' + h(value) + '">' +
+      '<div class="ff-timepick-rails">' +
+        '<div class="ff-timepick-window" aria-hidden="true"></div>' +
+        '<div class="ff-timepick-rail" data-unit="hour" tabindex="0" role="listbox" aria-label="' + h(label) + '小時"><div class="ff-timepick-track">' + hours + '</div></div>' +
+        '<div class="ff-timepick-rail" data-unit="minute" tabindex="0" role="listbox" aria-label="' + h(label) + '分鐘"><div class="ff-timepick-track">' + minutes + '</div></div>' +
+      '</div></div>';
+  }
+
+  // 外部（例如「改開始時間→結束等量平移」）要更新畫面時走這裡：只改視覺與 hidden input，不再 dispatch。
+  function syncTimePicker(el, value) {
+    if (!el || el.dataset.tpTouch === 'true') return;   // 使用者手指還在上面就別動它
+    el.dataset.value = value;
+    var input = el.querySelector('input');
+    if (input) input.value = value;
+    timePickPlace(el, value);
+  }
+
+  function bindTimePicker(el) {
+    var settleTimer = null;
+
+    function commit() {
+      var value = timePickCurrent(el);
+      if (!value || value === el.dataset.value) return;   // 防迴圈護欄：值沒變就不發事件（iOS snap 回彈會多打 scroll）
+      el.dataset.value = value;
+      var input = el.querySelector('input');
+      if (!input) return;
+      input.value = value;                                              // 順序不可反：先寫 value
+      input.dispatchEvent(new Event('input', { bubbles: true }));       // 再 dispatch（hidden input 不會自己發）
+    }
+
+    function repaint() {
+      ['hour', 'minute'].forEach(function (unit) {
+        var rail = timePickRail(el, unit);
+        var width = rail && timePickItemWidth(rail);
+        if (!(width > 0)) return;
+        timePickMark(rail, clamp(Math.round(rail.scrollLeft / width), 0, timePickItems(rail).length - 1));
+      });
+      timePickReadout(el, timePickCurrent(el) || el.dataset.value);
+    }
+
+    function onScroll() {
+      if (el.dataset.tpTouch !== 'true' && +el.dataset.tpQuiet > Date.now()) return;
+      repaint();                                        // 滑動中只更新視覺
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(commit, 120);            // 落定才提交（scrollend 沒有時的保險）
+    }
+
+    function moveTo(rail, index, smooth) {
+      timePickMark(rail, index);
+      var width = timePickItemWidth(rail);
+      el.dataset.tpQuiet = String(Date.now() + (smooth ? 400 : 200));
+      if (width > 0) {
+        if (smooth) rail.style.scrollBehavior = 'smooth';
+        rail.scrollLeft = index * width;
+        if (smooth) setTimeout(function () { rail.style.scrollBehavior = 'auto'; }, 280);
+      }
+      timePickReadout(el, timePickCurrent(el));
+      clearTimeout(settleTimer);
+      commit();
+    }
+
+    ['hour', 'minute'].forEach(function (unit) {
+      var rail = timePickRail(el, unit);
+      if (!rail) return;
+      rail.addEventListener('scroll', onScroll, { passive: true });
+      if (typeof window !== 'undefined' && 'onscrollend' in window) rail.addEventListener('scrollend', function () { clearTimeout(settleTimer); repaint(); commit(); });
+      rail.addEventListener('keydown', function (event) {
+        var max = timePickItems(rail).length - 1, index = timePickSelected(rail), next;
+        if (event.key === 'ArrowLeft') next = index - 1;
+        else if (event.key === 'ArrowRight') next = index + 1;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = max;
+        else return;
+        event.preventDefault();
+        timePickFocusMemo = { attr: el.dataset.ffTimepick, unit: unit, at: Date.now() };
+        moveTo(rail, clamp(next, 0, max), false);
+      });
+    });
+
+    el.addEventListener('click', function (event) {
+      var button = event.target && event.target.closest && event.target.closest('.ff-timepick-track > button');
+      if (!button) return;
+      var rail = button.parentElement.parentElement;
+      moveTo(rail, +button.dataset.index || 0, true);
+    });
+    ['pointerdown', 'touchstart'].forEach(function (type) {
+      el.addEventListener(type, function () { el.dataset.tpTouch = 'true'; el.dataset.tpQuiet = '0'; }, { passive: true });
+    });
+    ['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach(function (type) {
+      el.addEventListener(type, function () { el.dataset.tpTouch = 'false'; }, { passive: true });
+    });
+  }
+
+  // 每次 sheet 重建後都要跑（innerHTML 會把 listener 全清掉）；由 openSheet 統一 hook，不必在各呼叫點補。
+  function initTimePickers(root) {
+    if (!root || !root.querySelectorAll) return;
+    // 焦點記憶不「用完就丟」：一次操作可能連續重繪兩次（renderEditor + runPreview 結尾又一次），
+    // 只消耗一次的話第二次重繪照樣把焦點弄丟 → 連按兩下方向鍵的第二下會落空。改成靠 900ms 到期。
+    var memo = timePickFocusMemo && Date.now() - timePickFocusMemo.at < 900 ? timePickFocusMemo : null;
+    if (!memo) timePickFocusMemo = null;
+    Array.prototype.forEach.call(root.querySelectorAll('.ff-timepick'), function (el) {
+      if (el.dataset.tpReady === 'true') return;
+      el.dataset.tpReady = 'true';
+      bindTimePicker(el);
+      if (!timePickPlace(el, el.dataset.value) && typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(function () { if (el.dataset.tpTouch !== 'true') timePickPlace(el, el.dataset.value); });
+      }
+      // 只在焦點確實被重建弄丟時才補回，避免搶走使用者已經移到別處的焦點。
+      var focusLost = !document.activeElement || document.activeElement === document.body;
+      if (memo && focusLost && memo.attr === el.dataset.ffTimepick) {
+        var rail = timePickRail(el, memo.unit);
+        if (rail && rail.focus) rail.focus();
+      }
+    });
+  }
+
+  function timeSpanNote(minutes) {
+    var total = Math.round(+minutes || 0);
+    if (total <= 0) return '時長 —';
+    if (total < 60) return '時長 ' + total + ' 分';
+    var hours = Math.floor(total / 60), rest = total % 60;
+    return '時長 ' + hours + ' 小時' + (rest ? ' ' + rest + ' 分' : '');
+  }
+
   function timeFromIso(value) {
     var match = typeof value === 'string' && value.match(/T(\d{2}:\d{2})/);
     return match ? match[1] : '';
@@ -158,28 +366,20 @@
 
   function occurrenceTitle(item) {
     item = occurrenceOf(item) || {};
-    if (isTransportOccurrence(item)) {
-      if (item.custom && item.custom.title) return item.custom.title;
-      if (item.transport && item.transport.routeLabel) return item.transport.routeLabel;
-    }
     if (item.placeId && typeof getPlace === 'function') {
       var place = getPlace(item.placeId);
       if (place && place.name) return place.name;
     }
     if (item.custom && item.custom.title) return item.custom.title;
-    if (item.transport && item.transport.routeLabel) return item.transport.routeLabel;
     return kindLabel(item.scheduleKind);
   }
 
   function kindLabel(kind) {
-    return ({
-      place: '地點', custom: '自訂', transport: '移動', connector_travel: '接駁交通',
-      booked_transport: '預約交通', flight: '航班／長途交通', sleep: '休息'
-    })[kind] || '行程';
+    return ({ place: '地點', custom: '自訂', sleep: '休息' })[kind] || '行程';
   }
 
   function kindIcon(kind) {
-    return ({ place: '●', custom: '◆', transport: '→', connector_travel: '→', booked_transport: '◆', flight: '✈', sleep: '◐' })[kind] || '●';
+    return ({ place: '●', custom: '◆', sleep: '◐' })[kind] || '●';
   }
 
   function fineSort(items) {
@@ -196,32 +396,13 @@
     });
   }
 
-  function fallbackIssues(precise) {
-    var issues = [];
-    for (var i = 0; i < precise.length - 1; i++) {
-      var current = occurrenceOf(precise[i]), next = occurrenceOf(precise[i + 1]);
-      var delta = Math.round((Date.parse(next.fine.startAt) - Date.parse(current.fine.endAt)) / 60000);
-      if (delta < 0) issues.push({ id: 'conflict_' + current.id + '_' + next.id, type: 'conflict', severity: 'warning', status: 'preexisting', minutes: -delta });
-      else if (delta > 0) issues.push({ id: 'gap_' + current.id + '_' + next.id, type: 'gap', severity: 'info', status: 'preexisting', minutes: delta });
-    }
-    return issues;
-  }
-
-  function missingLocationIds(items) {
-    return items.map(occurrenceOf).filter(function (item) {
-      if (item.scheduleKind !== 'place') return false;
-      if (!item.placeId || typeof getPlace !== 'function') return true;
-      var place = getPlace(item.placeId);
-      return !place || place.lat == null || place.lng == null;
-    }).map(function (item) { return item.id; });
-  }
-
-  function issueContext(items, dayId) {
-    return {
-      trip: typeof TRIP !== 'undefined' ? TRIP : {},
-      missingLocationOccurrenceIds: missingLocationIds(items),
-      dayEndAt: dayId ? zonedIso(addDays(dayDate(dayId), 1), '00:00') : null
-    };
+  // 營業時間提醒：只有引用地點卡、且卡上真的有營業時間資料時才講；自訂行程與交通不講。
+  function hoursWarningsFor(item, place) {
+    var occurrence = occurrenceOf(item) || {};
+    if (!occurrence.placeId || !occurrence.fine) return [];
+    var card = place || (typeof getPlace === 'function' ? getPlace(occurrence.placeId) : null);
+    if (!card || typeof CNXCore === 'undefined' || typeof CNXCore.hoursWarnings !== 'function') return [];
+    return CNXCore.hoursWarnings(card, occurrence.fine.startAt, occurrence.fine.endAt);
   }
 
   function buildSchedule(version, dayId) {
@@ -243,17 +424,7 @@
     if (schedule && Array.isArray(schedule.precise)) precise = fineSort(schedule.precise.map(occurrenceOf));
     if (schedule && Array.isArray(schedule.unscheduled)) unplanned = schedule.unscheduled.map(occurrenceOf);
     if (schedule && Array.isArray(schedule.unplanned)) unplanned = schedule.unplanned.map(occurrenceOf);
-    var issues = schedule && Array.isArray(schedule.issues) ? schedule.issues : null;
-    var allItems = precise.concat(unplanned);
-    if (!issues) {
-      var api = ffApi();
-      if (typeof api.detectScheduleIssues === 'function') {
-        try { issues = api.detectScheduleIssues(schedule, schedule, issueContext(allItems, dayId)); }
-        catch (_) { issues = null; }
-      }
-    }
-    if (!Array.isArray(issues)) issues = fallbackIssues(precise);
-    return { schedule: schedule, precise: precise, unplanned: unplanned, issues: issues, missingLocationIds: missingLocationIds(allItems) };
+    return { schedule: schedule, precise: precise, unplanned: unplanned };
   }
 
   function dayMeta(dayId) {
@@ -261,86 +432,11 @@
     return days.find(function (day) { return day.id === dayId; }) || { id: dayId, label: dayId, wd: '' };
   }
 
-  function buildViewModel() {
-    var version = activeVersion();
-    if (!version) throw new Error('找不到目前使用的行程版本');
-    var known = typeof DAYS !== 'undefined' && Array.isArray(DAYS) ? DAYS.map(function (day) { return day.id; }) : [];
-    (version.plan || []).forEach(function (item) { var id = fineDayId(item); if (id && known.indexOf(id) < 0) known.push(id); });
-    var days = known.map(function (dayId) {
-      var parts = scheduleParts(buildSchedule(version, dayId), dayId, version);
-      var todos = parts.precise.concat(parts.unplanned).reduce(function (sum, item) { return sum + (Array.isArray(item.todos) ? item.todos.length : 0); }, 0);
-      var conflicts = parts.issues.filter(function (issue) { return issue.type === 'conflict' || issue.type === 'travel_shortage' || issue.type === 'anchor_violation'; }).length;
-      var gaps = parts.issues.filter(function (issue) { return issue.type === 'gap'; }).length;
-      return Object.assign({ id: dayId, meta: dayMeta(dayId), todos: todos, conflicts: conflicts, gaps: gaps, missingLocations: parts.missingLocationIds.length }, parts);
-    });
-    return { version: version, days: days, preciseCount: days.reduce(function (sum, day) { return sum + day.precise.length; }, 0), unplannedCount: days.reduce(function (sum, day) { return sum + day.unplanned.length; }, 0) };
-  }
-
-  function issueBadge(day) {
-    var bits = [];
-    if (day.conflicts) bits.push('<span class="ff-badge warn">' + day.conflicts + ' 個問題</span>');
-    if (day.gaps) bits.push('<span class="ff-badge">' + day.gaps + ' 段空檔</span>');
-    if (day.missingLocations) bits.push('<span class="ff-badge travel">交通資訊待確認</span>');
-    if (day.unplanned.length) bits.push('<span class="ff-badge quiet">' + day.unplanned.length + ' 項未排</span>');
-    if (day.todos) bits.push('<button type="button" class="ff-todo-link" data-action="ff-todos" data-day="' + h(day.id) + '" aria-label="查看 ' + day.todos + ' 件待辦">□ ' + day.todos + '</button>');
-    return bits.join('');
-  }
-
-  function itemRow(item, unplanned) {
-    var start = item.fine ? timeFromIso(item.fine.startAt) : '未排';
-    var end = item.fine ? timeFromIso(item.fine.endAt) : '';
-    var duration = minuteDuration(item);
-    var todoOpen = Array.isArray(item.todos) ? item.todos.filter(function (todo) { return !todo.done; }).length : 0;
-    var flags = [];
-    if (item.fine && item.fine.fixedMarker) flags.push('<span class="ff-tag fixed">固定</span>');
-    if (item.scheduleKind && item.scheduleKind !== 'place') flags.push('<span class="ff-tag">' + h(kindLabel(item.scheduleKind)) + '</span>');
-    if (todoOpen) flags.push('<span class="ff-todo-count" aria-label="' + todoOpen + ' 件未完成待辦">□' + todoOpen + '</span>');
-    var transport = item.transport && item.transport.routeLabel ? '<span class="ff-route">' + h(item.transport.routeLabel) + '</span>' : '';
-    return '<button type="button" class="ff-item' + (unplanned ? ' unplanned' : '') + '" data-action="ff-edit" data-eid="' + h(item.id) + '">' +
-      '<span class="ff-time"><b>' + h(start) + '</b>' + (end ? '<small>' + h(end) + '</small>' : '<small>設定時間</small>') + '</span>' +
-      '<span class="ff-mark ' + h(item.scheduleKind || 'place') + '" aria-hidden="true">' + h(kindIcon(item.scheduleKind)) + '</span>' +
-      '<span class="ff-item-main"><span class="ff-item-title">' + h(occurrenceTitle(item)) + '</span>' +
-        '<span class="ff-item-meta">' + (duration ? duration + ' 分鐘' : '尚未排時間') + transport + '</span></span>' +
-      '<span class="ff-item-flags">' + flags.join('') + '<span class="ff-chevron" aria-hidden="true">›</span></span>' +
-    '</button>';
-  }
-
-  function renderDay(day, single) {
-    var begin = day.precise.length ? timeFromIso(day.precise[0].fine.startAt) : '未排';
-    var finish = day.precise.length ? timeFromIso(day.precise[day.precise.length - 1].fine.endAt) : '未排';
-    var rows = day.precise.map(function (item) { return itemRow(item, false); }).join('');
-    var unplanned = day.unplanned.length ? '<div class="ff-subhead"><span>尚未排時間</span><b>' + day.unplanned.length + '</b></div>' +
-      day.unplanned.map(function (item) { return itemRow(item, true); }).join('') : '';
-    if (!rows && !unplanned) rows = '<div class="ff-day-empty">這天還沒有行程</div>';
-    return '<section class="ff-day' + (single ? ' single' : '') + '" aria-labelledby="ff-day-' + h(day.id) + '">' +
-      '<div class="ff-day-head"><div><span class="ff-kicker">' + h(day.meta.wd ? '星期' + day.meta.wd : '行程日') + '</span>' +
-        '<h2 id="ff-day-' + h(day.id) + '">' + h(day.meta.label) + '</h2></div>' +
-        '<div class="ff-day-range"><b>' + h(begin) + '～' + h(finish) + '</b><small>' + day.precise.length + ' 項精確行程</small></div>' +
-        (!single ? '<button type="button" class="ff-day-open" data-action="ff-day" data-day="' + h(day.id) + '" aria-label="展開 ' + h(day.meta.label) + ' 單日細流">展開</button>' : '') +
-      '</div><div class="ff-day-summary">' + issueBadge(day) + '</div><div class="ff-items">' + rows + unplanned + '</div></section>';
-  }
-
-  function renderPage(model) {
-    if (!model.days.length) return '<div class="ff-state"><span>◷</span><h2>還沒有可排的日期</h2><p>先在設定裡填好旅程日期，再回來建立細流。</p></div>';
-    var selected = state.day && model.days.find(function (day) { return day.id === state.day; });
-    if (selected) {
-      return '<div class="ff-page-head single"><button type="button" class="ff-back" data-action="ff-global" aria-label="返回全域細流">←</button>' +
-        '<div><span class="ff-kicker">單日細流</span><h1>' + h(selected.meta.label) + '・星期' + h(selected.meta.wd) + '</h1></div>' +
-        '<button type="button" class="ff-add" data-action="ff-add" data-day="' + h(selected.id) + '">＋ 自訂行程</button></div>' + renderDay(selected, true);
-    }
-    var usefulDays = model.days.filter(function (day) { return day.precise.length || day.unplanned.length; });
-    return '<div class="ff-page-head"><div><span class="ff-kicker">智慧排程</span><h1>細流</h1><p>精確時間與影響預演都在這裡，不會未經確認移動後續行程。</p></div>' +
-      '<button type="button" class="ff-add" data-action="ff-add">＋ 自訂行程</button></div>' +
-      '<div class="ff-overview" aria-label="細流摘要"><div><b>' + model.preciseCount + '</b><span>已排時間</span></div><div><b>' + model.unplannedCount + '</b><span>尚未排</span></div><button type="button" data-action="ff-todos"><b>□</b><span>集中待辦</span></button></div>' +
-      (usefulDays.length ? usefulDays.map(function (day) { return renderDay(day, false); }).join('') : '<div class="ff-state"><span>◷</span><h2>目前都還沒排精確時間</h2><p>點下方的未排項目設定開始與結束時間，或新增一筆自訂行程。</p></div>') +
-      (model.unplannedCount && !usefulDays.length ? '' : '');
-  }
-
   // ── 三日行事曆 DOM contract ──────────────────────────────────────
   // .ff-calendar > .ff-cal-toolbar + .ff-cal-date-row + .ff-cal-scroll + .ff-cal-fab
   // .ff-cal-scroll > .ff-cal-time-gutter + .ff-cal-days > .ff-cal-day
   // .ff-cal-day > .ff-cal-slot（空白命中層）+ .ff-cal-card（絕對定位）
-  // 卡片狀態：.density-{small|medium|large}、.is-conflict、.is-fixed、.is-selected、.is-preview
+  // 卡片狀態：.density-{small|medium|large}、.is-hours-warning、.is-fixed、.is-selected、.is-preview
   // Sheet：.ff-source-sheet、.ff-detail-sheet、.ff-create-sheet；CSS 只需鎖在 #pg-fineflow / .ff-sheet。
   function calendarApi() { return window.CNXFineFlowCalendar || {}; }
 
@@ -416,16 +512,6 @@
     } catch (_) { return ''; }
   }
 
-  function calendarIssueIds(day) {
-    var ids = {};
-    (day && day.issues || []).forEach(function (issue) {
-      if (issue.accepted || issue.status === 'resolved') return;
-      if (issue.type !== 'conflict' && issue.type !== 'travel_shortage' && issue.type !== 'anchor_violation') return;
-      (issue.occurrenceIds || []).forEach(function (id) { ids[id] = true; });
-    });
-    return ids;
-  }
-
   function buildCalendarModel() {
     var api = calendarApi();
     if (typeof api.projectDateSchedules !== 'function') throw new Error('多日行事曆模組尚未載入');
@@ -434,10 +520,11 @@
     if (state.lastVersionId && state.lastVersionId !== version.id) {
       state.createDraft = null;
       state.selectedId = null;
+      state.armedId = null;
       state.editor = null;
       state.importPreview = null;
       clearTimeout(previewTimer);
-      if (pointerDraft) clearTimeout(pointerDraft.timer);
+      if (pointerDraft) removePointerVisuals(pointerDraft);
       pointerDraft = null;
       if (uiStore) uiStore.dispatch({ type: 'VERSION_CHANGED' });
     }
@@ -456,7 +543,7 @@
     var schedules = dates.map(function (date) {
       var dayId = dayIdForDate(date);
       var parts = scheduleParts(buildSchedule(version, dayId), dayId, version);
-      return { day: dayId, date: date, items: parts.precise, unscheduled: parts.unplanned, issues: parts.issues };
+      return { day: dayId, date: date, items: parts.precise, unscheduled: parts.unplanned };
     });
     var pixelsPerHour = calendarPixelsPerHour();
     var projection = api.projectDateSchedules(trackAnchor, schedules, trackCount, {
@@ -471,8 +558,6 @@
     });
     projection.days.forEach(function (day, index) {
       day.dayId = schedules[index].day;
-      day.issues = schedules[index].issues;
-      day.conflictIds = calendarIssueIds(schedules[index]);
     });
     projection.trackDays = projection.days;
     projection.days = mobile ? projection.trackDays.slice(anchorIndex, anchorIndex + count) : projection.trackDays.slice();
@@ -516,28 +601,36 @@
   function renderCalendarCard(card, day) {
     var todos = card.todos || { total: 0, completed: 0, firstIncomplete: null };
     var selected = state.selectedId === card.id;
-    var conflict = !!(day.conflictIds && day.conflictIds[card.id]);
+    var warnings = hoursWarningsFor(card.occurrence, card.place);
+    var warningText = warnings.join('・');
     var map = safeMapsUrl(card.mapsUrl);
     var note = card.rawHeight >= 60 && card.note ? '<span class="ff-cal-card-note">' + h(card.note) + '</span>' : '';
     var todo = card.density === 'large' && todos.firstIncomplete ? '<span class="ff-cal-card-todo-summary"><span class="ff-cal-check" aria-hidden="true"></span><span>' + h(todos.firstIncomplete.text) + '</span></span>' : '';
-    var desktopControls = calendarIsDesktop() ?
-      '<button type="button" class="ff-cal-drag-handle" data-action="ff-drag-card" data-eid="' + h(card.id) + '" aria-label="拖動調整時間"></button>' +
+    // 把手輸出規則（Vivian：「不畫那些輔助標誌但可以使用」）：
+    // 桌機照舊全出（靠 hover 顯示）；手機平常一個都不畫，只有長按解鎖的那張卡（is-armed）長出上下兩個把手。
+    var armed = state.armedId === card.id;
+    var resizeHandles =
       '<button type="button" class="ff-cal-resize ff-cal-resize-start" data-action="ff-resize-start" data-eid="' + h(card.id) + '" aria-label="調整開始時間"></button>' +
-      '<button type="button" class="ff-cal-resize ff-cal-resize-end" data-action="ff-resize-end" data-eid="' + h(card.id) + '" aria-label="調整結束時間"></button>' : '';
+      '<button type="button" class="ff-cal-resize ff-cal-resize-end" data-action="ff-resize-end" data-eid="' + h(card.id) + '" aria-label="調整結束時間"></button>';
+    var cardControls = calendarIsDesktop() ?
+      '<button type="button" class="ff-cal-drag-handle" data-action="ff-drag-card" data-eid="' + h(card.id) + '" aria-label="拖動調整時間"></button>' + resizeHandles :
+      (armed ? resizeHandles : '');
     var classes = ['ff-cal-card', 'density-' + card.density];
-    if (conflict) classes.push('is-conflict');
+    if (warningText) classes.push('is-hours-warning');
     if (card.fixed) classes.push('is-fixed');
     if (selected) classes.push('is-selected');
+    if (armed) classes.push('is-armed');
     var left = 1.5 + card.leftPercent * 0.92;
     var width = card.widthPercent * 0.92;
     return '<article class="' + classes.join(' ') + '" data-eid="' + h(card.id) + '" style="--ff-top:' + card.top + 'px;--ff-height:' + card.height + 'px;--ff-left:' + left + '%;--ff-width:' + width + '%;--ff-card-bg:' + h(card.palette.background) + ';--ff-card-border:' + h(card.palette.border) + ';--ff-card-text:' + h(card.palette.text) + ';top:' + card.top + 'px;height:' + card.height + 'px;left:' + left + '%;width:' + width + '%;background:' + h(card.palette.background) + ';border-color:' + h(card.palette.border) + ';color:' + h(card.palette.text) + '">' +
       '<div class="ff-cal-card-main" role="button" tabindex="0" data-action="ff-card-detail" data-eid="' + h(card.id) + '" data-ff-drag="card" aria-label="查看 ' + h(card.title) + '">' +
         '<strong class="ff-cal-card-title"><span class="ff-cal-type-icon" aria-hidden="true">' + h(card.categoryIcon || '📍') + '</span>' + h(card.title) + '</strong>' +
-        '<span class="ff-cal-card-time">' + h(card.startLabel + '–' + card.endLabel) + '</span>' + note + todo +
-        '<span class="ff-cal-card-flags">' + (card.fixed ? '<span title="固定">鎖</span>' : '') + (conflict ? '<span class="ff-cal-conflict" title="有衝突">!</span>' : '') + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
+        '<span class="ff-cal-card-time">' + h(card.startLabel + '–' + card.endLabel) + '</span>' +
+        (warningText ? '<span class="ff-cal-card-hours">' + h(warningText) + '</span>' : '') + note + todo +
+        '<span class="ff-cal-card-flags">' + (card.fixed ? '<span title="固定">鎖</span>' : '') + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
       '</div>' +
       (map ? '<a class="ff-cal-card-map-link" href="' + h(map) + '" target="_blank" rel="noopener noreferrer" aria-label="在 Google Maps 開啟' + h(card.title) + '">Maps ↗</a>' : '') +
-      desktopControls +
+      cardControls +
       '<span hidden data-action="ff-edit" data-eid="' + h(card.id) + '"></span>' +
     '</article>';
   }
@@ -627,11 +720,6 @@
     return buildSchedule(version, dayId);
   }
 
-  function contextForDay(dayId) {
-    var parts = scheduleParts(scheduleFor(dayId), dayId, activeVersion());
-    return issueContext(parts.precise.concat(parts.unplanned), dayId);
-  }
-
   function editorRequest(editor) {
     var item = findOccurrence(editor.id);
     var date = editor.date || fineDate(item);
@@ -645,12 +733,7 @@
       sourceDay: fineDayId(item), targetDay: dayIdForDate(date),
       startAt: startAt, endAt: endAt, newStartAt: startAt, newEndAt: endAt,
       fixedMarker: !!editor.fixedMarker,
-      compressibility: editor.compressibility,
-      minDurationMin: Math.max(0, +editor.minDurationMin || 0),
       targetOccurrenceId: editor.targetId || null, swapWithOccurrenceId: editor.targetId || null,
-      context: contextForDay(dayIdForDate(date)),
-      sourceContext: contextForDay(fineDayId(item)),
-      targetContext: contextForDay(dayIdForDate(date)),
       rules: { maxContinuousGapMin: 90 }
     };
   }
@@ -659,14 +742,10 @@
     var after = copy(item);
     var duration = Math.round((Date.parse(request.endAt) - Date.parse(request.startAt)) / 60000);
     after.fine = Object.assign({
-      originalDurationMin: duration, minDurationMin: Math.min(duration, 30),
-      compressibility: 'none', fixedMarker: false, timeCommitment: 'flexible',
-      autoMovePolicy: 'manual', manualOrder: 0
+      originalDurationMin: duration, fixedMarker: false, manualOrder: 0
     }, after.fine || {}, {
       startAt: request.startAt, endAt: request.endAt,
-      fixedMarker: request.fixedMarker,
-      compressibility: request.compressibility,
-      minDurationMin: Math.min(duration, request.minDurationMin)
+      fixedMarker: request.fixedMarker
     });
     after.startTime = timeFromIso(request.startAt);
     var base = schedule && !Array.isArray(schedule) ? copy(schedule) : { day: fineDayId(item), timeZone: typeof TRIP !== 'undefined' && TRIP.timeZone, items: [], unscheduled: [] };
@@ -679,24 +758,14 @@
       unscheduled: base.unscheduled.filter(function (entry) { return entry.id !== item.id; })
     };
     afterSchedule.all = afterSchedule.items.concat(afterSchedule.unscheduled);
-    var issues = [];
     var api = ffApi();
-    if (typeof api.detectScheduleIssues === 'function') {
-      try { issues = api.detectScheduleIssues(base, afterSchedule, request.context || {}); } catch (_) {}
-    }
-    issues = (issues || []).map(function (issue) {
-      if (!Array.isArray(issue.resolutions) && typeof api.suggestResolutions === 'function') {
-        try { issue.resolutions = api.suggestResolutions(issue, afterSchedule, request.rules || {}); } catch (_) {}
-      }
-      return issue;
-    });
     return {
       id: 'ff_fallback_' + Date.now(), operation: operation,
       versionId: activeVersion().id, day: fineDayId(item),
       baseFingerprint: typeof api.baseFingerprint === 'function' ? api.baseFingerprint(base) : JSON.stringify(base),
       mutations: [{ occurrenceId: item.id, before: copy(item), after: after, reason: '調整時間' }],
-      issues: issues, summary: { moved: 1, shortened: 0, unresolved: issues.filter(function (issue) { return issue.status !== 'resolved'; }).length },
-      beforeSchedule: base, afterSchedule: afterSchedule, context: copy(request.context || {}), rules: copy(request.rules || {}),
+      summary: { moved: 1, shortened: 0 },
+      beforeSchedule: base, afterSchedule: afterSchedule, rules: copy(request.rules || {}),
       manualFirstSchedule: !item.fine
     };
   }
@@ -711,9 +780,6 @@
       var api = ffApi(), request = editorRequest(editor), schedule = scheduleFor(fineDayId(item)), transaction;
       var targetDay = dayIdForDate(editor.date || fineDate(item));
       if (!editor.firstSchedule && targetDay !== fineDayId(item) && typeof api.previewCrossDayChange === 'function') {
-        request.contextByDay = {};
-        request.contextByDay[fineDayId(item)] = request.sourceContext;
-        request.contextByDay[targetDay] = request.targetContext;
         request.mode = editor.mode;
         request.strategy = editor.mode;
         transaction = api.previewCrossDayChange(activeVersion(), request, typeof TRIP !== 'undefined' ? TRIP : {});
@@ -755,140 +821,12 @@
     return fineSort(parts.precise.concat(parts.unplanned)).filter(function (candidate) { return candidate.id !== item.id; });
   }
 
-  function transactionScheduleForIssue(transaction, issue) {
-    if (!transaction) return null;
-    if (issue && issue.day && transaction.afterSchedules && transaction.afterSchedules[issue.day]) return transaction.afterSchedules[issue.day];
-    return transaction.afterSchedule || null;
-  }
-
-  function issueOccurrence(transaction, issue, id) {
-    var schedule = transactionScheduleForIssue(transaction, issue);
-    var scheduled = schedule && Array.isArray(schedule.items) && schedule.items.find(function (item) { return item.id === id; });
-    if (scheduled) return scheduled;
-    var mutation = transaction && Array.isArray(transaction.mutations) && transaction.mutations.find(function (entry) { return entry.occurrenceId === id; });
-    return mutation && mutation.after || findOccurrence(id);
-  }
-
-  function occurrenceDateLabel(item) {
-    var iso = item && item.fine && item.fine.startAt;
-    if (!iso) return '';
-    var parts = iso.slice(0, 10).split('-');
-    return parts.length === 3 ? (+parts[1]) + '/' + (+parts[2]) : '';
-  }
-
-  function occurrenceTimeLabel(item, edge) {
-    if (!item || !item.fine) return '時間未定';
-    return timeFromIso(edge === 'end' ? item.fine.endAt : item.fine.startAt) || '時間未定';
-  }
-
-  function issueRouteLabel(transaction, issue, left, right) {
-    if (!left || !right) return '';
-    var date = occurrenceDateLabel(right) || occurrenceDateLabel(left);
-    return (date ? date + ' ' : '') + occurrenceTitle(left) + ' ' + occurrenceTimeLabel(left, 'end') + ' 結束 → ' + occurrenceTitle(right) + ' ' + occurrenceTimeLabel(right, 'start') + ' 開始';
-  }
-
-  function issueDescription(issue, transaction) {
-    var ids = issue.occurrenceIds || [];
-    var left = issueOccurrence(transaction, issue, ids[0]);
-    var right = issueOccurrence(transaction, issue, ids[1]);
-    var minutes = Math.max(0, +issue.minutes || 0);
-    if ((issue.type === 'gap' || issue.type === 'conflict') && left && right) {
-      return issueRouteLabel(transaction, issue, left, right) + '：' + (issue.type === 'gap' ? '空檔 ' : '重疊 ') + minutes + ' 分鐘';
-    }
-    if (issue.type === 'travel_shortage' && left) {
-      var from = left.transport && issueOccurrence(transaction, issue, left.transport.fromOccurrenceId);
-      var to = left.transport && issueOccurrence(transaction, issue, left.transport.toOccurrenceId);
-      var route = from && to ? occurrenceTitle(from) + ' → ' + occurrenceTitle(to) : occurrenceTitle(left);
-      return (occurrenceDateLabel(left) ? occurrenceDateLabel(left) + ' ' : '') + route + '：交通時間還缺 ' + minutes + ' 分鐘';
-    }
-    if (issue.type === 'unknown_travel' && left) {
-      var schedule = transactionScheduleForIssue(transaction, issue);
-      var items = schedule && Array.isArray(schedule.items) ? schedule.items : [];
-      var index = items.findIndex(function (item) { return item.id === left.id; });
-      if (isTransportOccurrence(left)) {
-        var actualFrom = index > 0 ? items[index - 1] : null;
-        var actualTo = index >= 0 && index + 1 < items.length ? items[index + 1] : null;
-        var missing = [];
-        if (!left.transport || !left.transport.fromOccurrenceId) missing.push('起點');
-        if (!left.transport || !left.transport.toOccurrenceId) missing.push('終點');
-        if (!left.transport || !(+left.transport.minDurationMin > 0)) missing.push('交通時間');
-        if (issue.actualOccurrenceIds && issue.expectedOccurrenceIds) missing.push('正確的前後銜接');
-        var actualRoute = actualFrom || actualTo ? (actualFrom ? occurrenceTitle(actualFrom) : '起點未定') + ' → ' + (actualTo ? occurrenceTitle(actualTo) : '終點未定') : occurrenceTitle(left);
-        return actualRoute + '：缺少' + (missing.length ? missing.join('、') : '可用的路線資料');
-      }
-      var previous = index > 0 ? items[index - 1] : null;
-      var next = index >= 0 && index + 1 < items.length ? items[index + 1] : null;
-      var routes = [];
-      if (previous) routes.push(occurrenceTitle(previous) + ' → ' + occurrenceTitle(left));
-      if (next) routes.push(occurrenceTitle(left) + ' → ' + occurrenceTitle(next));
-      return (routes.length ? routes.join('、') + '：' : occurrenceTitle(left) + '：') + '「' + occurrenceTitle(left) + '」缺少地點資料，無法確認交通時間';
-    }
-    if (left) {
-      return (occurrenceDateLabel(left) ? occurrenceDateLabel(left) + ' ' : '') + occurrenceTitle(left) + ' ' + occurrenceTimeLabel(left, 'start') + '：' + (issue.message || (minutes ? '相差 ' + minutes + ' 分鐘' : '需要確認'));
-    }
-    return issue.message || (minutes ? '相差 ' + minutes + ' 分鐘' : '請選擇要如何處理');
-  }
-
-  function resolutionImpact(resolution, transaction) {
-    var api = ffApi();
-    var rid = resolution && (resolution.id || resolution.resolutionId || resolution.action || resolution.type);
-    if (!rid || typeof api.applyResolution !== 'function') return 0;
-    try {
-      var preview = api.applyResolution(transaction, rid);
-      return preview && Array.isArray(preview.mutations) ? preview.mutations.filter(function (mutation) {
-        if (!mutation.before || !mutation.after || !mutation.before.fine || !mutation.after.fine) return false;
-        return mutation.before.fine.startAt !== mutation.after.fine.startAt || mutation.before.fine.endAt !== mutation.after.fine.endAt;
-      }).length : 0;
-    } catch (_) { return 0; }
-  }
-
-  function resolutionLabel(resolution, issue, transaction) {
-    var action = resolution.action || resolution.type || resolution.id || '';
-    var target = resolution.occurrenceId && issueOccurrence(transaction, issue, resolution.occurrenceId);
-    var title = target ? occurrenceTitle(target) : (issue && issue.occurrenceIds && issue.occurrenceIds.length ? occurrenceTitle(issueOccurrence(transaction, issue, issue.occurrenceIds[0])) : '行程');
-    var minutes = Math.max(0, +(resolution.minutes != null ? resolution.minutes : issue && issue.minutes) || 0);
-    var affected = resolutionImpact(resolution, transaction);
-    if (action === 'connect') return '將' + title + '提前 ' + minutes + ' 分鐘' + (affected > 1 ? '，共調整 ' + affected + ' 項' : '');
-    if (action === 'push') return '將後面 ' + (affected || 1) + ' 項順延 ' + minutes + ' 分鐘';
-    if (action === 'shorten') return '將' + title + '縮短 ' + minutes + ' 分鐘';
-    if (action === 'keep_gap') return '保留這段 ' + minutes + ' 分鐘空檔';
-    if (action === 'accept_conflict') return '保留 ' + minutes + ' 分鐘重疊（這次）';
-    if (action === 'override_anchor') return '移動固定行程' + (affected ? '，共調整 ' + affected + ' 項' : '') + (minutes ? '、' + minutes + ' 分鐘' : '');
-    if (action === 'relink_transport') return '改連為' + occurrenceTitle(issueOccurrence(transaction, issue, resolution.fromOccurrenceId)) + ' → ' + occurrenceTitle(issueOccurrence(transaction, issue, resolution.toOccurrenceId));
-    return resolution.label || resolution.message || action || '套用這個修復';
-  }
-
-  function issueTitle(issue) {
-    return ({ gap: '出現空檔', conflict: '時間重疊', travel_shortage: '交通時間不足', anchor_violation: '碰到固定行程', day_overflow: '行程跨到隔日', unknown_travel: '交通時間未知' })[issue.type] || '需要確認';
-  }
-
-  function transactionIssues(transaction) {
-    if (!transaction) return [];
-    if (Array.isArray(transaction.issues)) return transaction.issues;
-    if (transaction.afterSchedule && Array.isArray(transaction.afterSchedule.issues)) return transaction.afterSchedule.issues;
-    return [];
-  }
-
-  function issueCard(issue, index, transaction, options) {
-    options = options || {};
-    var resolutions = Array.isArray(issue.resolutions) ? issue.resolutions : [];
-    var status = issue.status || 'new';
-    var statusText = issue.accepted ? '已接受，保留警示' : (({ preexisting: '原本已有', worsened: '本次惡化', resolved: '已處理', new: '本次新增' })[status] || '');
-    return '<article class="ff-issue ' + h(issue.severity || 'warning') + (status === 'resolved' ? ' resolved' : '') + '">' +
-      '<div class="ff-issue-no">' + (index + 1) + '</div><div class="ff-issue-body"><div class="ff-issue-head"><b>' + h(issueTitle(issue)) + '</b><span>' + h(statusText) + '</span></div>' +
-      '<p>' + h(issueDescription(issue, transaction)) + '</p>' +
-      (options.showResolutions !== false && resolutions.length ? '<div class="ff-resolutions">' + resolutions.map(function (resolution, rIndex) {
-        var rid = resolution.id || resolution.resolutionId || resolution.action || resolution.type;
-        return '<button type="button" data-action="ff-resolution" data-id="' + h(rid) + '"' + (rIndex === 0 ? ' class="recommended"' : '') + '>' + h(resolutionLabel(resolution, issue, transaction)) + '</button>';
-      }).join('') + '</div>' : (options.showResolutions === false || status === 'resolved' || issue.accepted ? '' : '<span class="ff-unresolved">目前沒有可自動套用的做法，仍可自行調整時間或資料</span>')) + '</div></article>';
-  }
-
-  function editorChangeSummary(editor, pendingCount) {
+  function editorChangeSummary(editor) {
     var changes = [];
     if (editor.originalDate !== editor.date) changes.push('日期：' + editor.originalDate + ' → ' + editor.date);
     if (editor.originalStart !== editor.start || editor.originalEnd !== editor.end) changes.push('時間：' + editor.originalStart + '–' + editor.originalEnd + ' → ' + editor.start + '–' + editor.end);
     if (editor.coarseVisible && editor.originalCoarseSlot !== editor.coarseSlot) changes.push('粗流時段：' + coarseSlotLabel(editor.originalCoarseSlot) + ' → ' + coarseSlotLabel(editor.coarseSlot));
-    return '<section class="ff-change-summary" aria-label="本次修改摘要"><div class="ff-change-head"><div><span>本次修改</span><b>' + h(changes.length ? changes.join('；') : '日期與時間沒有變更') + '</b></div><span>尚待決定 ' + pendingCount + ' 項</span></div></section>';
+    return '<section class="ff-change-summary" aria-label="本次修改摘要"><div class="ff-change-head"><div><span>本次修改</span><b>' + h(changes.length ? changes.join('；') : '日期與時間沒有變更') + '</b></div></div></section>';
   }
 
   function summaryText(transaction) {
@@ -901,45 +839,13 @@
     return bits.join('、') || '尚無變更';
   }
 
-  function acceptPreviewConflicts() {
-    if (!state.editor || !state.editor.transaction) return;
-    var api = ffApi();
-    var transaction = state.editor.transaction;
-    try {
-      transactionIssues(transaction).filter(function (issue) {
-        return issue.type === 'conflict' && !issue.accepted && (issue.status === 'new' || issue.status === 'worsened');
-      }).forEach(function (issue) {
-        var resolution = (issue.resolutions || []).find(function (entry) { return (entry.action || entry.type || entry.id) === 'accept_conflict'; });
-        var resolutionId = resolution && (resolution.id || resolution.resolutionId || resolution.action || resolution.type);
-        if (resolutionId && typeof api.applyResolution === 'function') transaction = api.applyResolution(transaction, resolutionId) || transaction;
-      });
-      state.editor.transaction = transaction;
-      state.editor.mode = 'single';
-      if (uiStore && state.editor.pointerMode) uiStore.dispatch({ type: 'PREVIEW_READY', transaction: transaction });
-      renderEditor();
-    } catch (error) {
-      state.editor.error = error && error.message || '無法保留這次衝突';
-      renderEditor();
-    }
-  }
+  var TRAVEL_MODES = [['walk', '步行'], ['drive', '開車／叫車'], ['transit', '大眾運輸'], ['flight', '飛行']];
 
-  function isTransportOccurrence(item) {
-    return !!item && (item.scheduleKind === 'transport' || item.scheduleKind === 'connector_travel' || item.scheduleKind === 'booked_transport' || item.scheduleKind === 'flight');
-  }
-
-  function transportEditorFields(item, editor) {
-    if (!isTransportOccurrence(item)) return '';
-    var options = activePlan().filter(function (entry) { return entry.id !== item.id; }).map(function (entry) {
-      return '<option value="' + h(entry.id) + '">' + h(occurrenceTitle(entry)) + '</option>';
-    }).join('');
-    function endpointOptions(selected) {
-      return '<option value="">未指定</option>' + options.replace('value="' + h(selected || '') + '"', 'value="' + h(selected || '') + '" selected');
-    }
-    var transport = editor.transport || {};
-    return '<section class="ff-editor-section ff-transport-fields"><h4>交通銜接</h4><div class="ff-rule-grid"><label class="ff-field"><span>從哪項行程</span><select data-ff-transport-from>' + endpointOptions(transport.fromOccurrenceId) + '</select></label><label class="ff-field"><span>到哪項行程</span><select data-ff-transport-to>' + endpointOptions(transport.toOccurrenceId) + '</select></label></div><div class="ff-rule-grid"><label class="ff-field"><span>移動方式</span><select data-ff-transport-mode><option value="">未指定</option>' + ['walk', 'drive', 'transit', 'flight'].map(function (mode) {
-      var label = ({ walk: '步行', drive: '開車／叫車', transit: '大眾運輸', flight: '飛行' })[mode];
-      return '<option value="' + mode + '"' + (transport.mode === mode ? ' selected' : '') + '>' + label + '</option>';
-    }).join('') + '</select></label><label class="ff-field"><span>路線名稱</span><input data-ff-transport-route maxlength="80" value="' + h(transport.routeLabel || '') + '" placeholder="例如：前往餐廳"></label></div></section>';
+  // 移動方式不再只屬於交通卡：任何一筆行程都可以標「怎麼過去」。
+  function travelModeField(editor) {
+    return '<label class="ff-field"><span>移動方式</span><select data-ff-travel-mode><option value="">未指定</option>' + TRAVEL_MODES.map(function (entry) {
+      return '<option value="' + entry[0] + '"' + (editor.travelMode === entry[0] ? ' selected' : '') + '>' + entry[1] + '</option>';
+    }).join('') + '</select></label>';
   }
 
   function placeEditorFields(item, editor) {
@@ -949,7 +855,7 @@
     var regions = typeof regionsList === 'function' ? regionsList() : [];
     var per = place.cost && place.cost.per === 'shared' ? 'shared' : 'person';
     var amount = place.cost && place.cost.amount != null ? place.cost.amount : '';
-    return '<details class="ff-rules ff-place-card-fields"><summary>來源地點資料</summary><div class="ff-rules-body">' +
+    return '<section class="ff-editor-section ff-place-card-fields"><h4>地點資料</h4>' +
       '<p class="ff-link-note">這是這項行程引用的地點資料；在同一頁修改，不會再開另一套編輯器。若其他行程也引用這個地點，名稱與 Maps 會一起更新。</p>' +
       '<label class="ff-field"><span>Google Maps 連結</span><input type="url" inputmode="url" data-ff-place-maps value="' + h(place.mapsUrl || '') + '" placeholder="https://maps.google.com/…"></label>' +
       '<label class="ff-field"><span>地點備註</span><textarea data-ff-place-note maxlength="500" placeholder="例如營業提醒、訂位方式">' + h(place.note || '') + '</textarea></label>' +
@@ -959,28 +865,17 @@
       '<div class="ff-rule-grid"><label class="ff-field"><span>價格（NT$）</span><input type="number" inputmode="numeric" min="0" data-ff-place-amount value="' + h(amount) + '"></label>' +
       '<label class="ff-field"><span>計價方式</span><select data-ff-place-per><option value="person"' + (per === 'person' ? ' selected' : '') + '>每人</option><option value="shared"' + (per === 'shared' ? ' selected' : '') + '>共用</option></select></label></div>' +
       '<label class="ff-field"><span>優先程度</span><select data-ff-place-tier>' + [[0, '未分'], [1, 'T1 一定去'], [2, 'T2 滿想去'], [3, 'T3 順路'], [4, 'T4 可不去']].map(function (entry) { return '<option value="' + entry[0] + '"' + (+place.tier === entry[0] ? ' selected' : '') + '>' + entry[1] + '</option>'; }).join('') + '</select></label>' +
-      '</div></details>';
+      '</section>';
   }
 
-  function coarsePlanningFields(item, editor) {
-    if (!editor.coarseVisible || !editor.coarseDay || !editor.coarseSlot || !item.placeId) return '';
-    var slotItems = activePlan().filter(function (entry) { return entry.day === editor.coarseDay && entry.slot === editor.coarseSlot; });
-    var currentIndex = Math.max(0, slotItems.findIndex(function (entry) { return entry.id === item.id; }));
-    var placeOptions = (typeof places !== 'undefined' && Array.isArray(places) ? places : []).filter(function (place) {
-      return place && place.id && (place.id === editor.placeId || !CNXCore.isScheduled(place.id, activePlan()));
-    }).sort(function (left, right) { return String(left.name || '').localeCompare(String(right.name || ''), 'zh-Hant'); });
-    function options(selected, allowEmpty) {
-      return (allowEmpty ? '<option value="">未指定</option>' : '') + placeOptions.map(function (place) {
-        return '<option value="' + h(place.id) + '"' + (place.id === selected ? ' selected' : '') + '>' + h(place.name || place.id) + '</option>';
-      }).join('');
-    }
-    return '<details class="ff-rules ff-coarse-planning"><summary>粗流安排工具</summary><div class="ff-rules-body">' +
-      '<p class="ff-link-note">這些是同一筆行程在粗流裡的概略安排，儲存後細流仍保留同一個 ID。</p>' +
-      '<label class="ff-field"><span>這次要去的地點</span><select data-ff-place-choice>' + options(editor.placeId, false) + '</select></label>' +
-      (slotItems.length > 1 ? '<label class="ff-field"><span>同時段順序</span><select data-ff-coarse-order>' + slotItems.map(function (_entry, index) { return '<option value="' + index + '"' + (index === editor.coarseOrder || (editor.coarseOrder == null && index === currentIndex) ? ' selected' : '') + '>第 ' + (index + 1) + ' 個</option>'; }).join('') + '</select></label>' : '') +
-      '<label class="ff-fixed-check"><input type="checkbox" data-ff-coarse-pk' + (editor.coarsePk ? ' checked' : '') + '><span><b>這格是二選一</b><small>保留多個候選，之後再決定要去哪一個。</small></span></label>' +
-      '<div class="ff-rule-grid"><label class="ff-field"><span>備案 1</span><select data-ff-coarse-backup="0">' + options(editor.backupIds[0] || '', true) + '</select></label><label class="ff-field"><span>備案 2</span><select data-ff-coarse-backup="1">' + options(editor.backupIds[1] || '', true) + '</select></label></div>' +
-      '</div></details>';
+  // 編輯中就用「正在填的日期時間」判斷，讓提醒跟著輸入即時更新。
+  function editorHoursWarnings(editor, item) {
+    if (!editor || !item || !editor.placeId) return [];
+    var card = editor.placeCard || (typeof getPlace === 'function' ? getPlace(editor.placeId) : null);
+    if (!card || typeof CNXCore === 'undefined' || typeof CNXCore.hoursWarnings !== 'function') return [];
+    var date = editor.date || fineDate(item);
+    var endDate = editor.end <= editor.start ? addDays(date, 1) : date;
+    return CNXCore.hoursWarnings(card, zonedIso(date, editor.start), zonedIso(endDate, editor.end));
   }
 
   function renderEditor() {
@@ -989,15 +884,7 @@
     if (editor.pointerCompact) { renderPointerDecision(); return; }
     var duration = editor.durationMin;
     var transaction = editor.transaction;
-    var issues = transactionIssues(transaction);
-    var pendingIssues = issues.filter(function (issue) { return !issue.accepted && (issue.status === 'new' || issue.status === 'worsened'); });
-    var preexistingIssues = issues.filter(function (issue) { return issue.status === 'preexisting'; });
-    var handledIssues = issues.filter(function (issue) { return issue.accepted || issue.status === 'resolved'; });
     var candidates = scheduleCandidates(editor);
-    var blocking = pendingIssues.some(function (issue) {
-      if (issue.severity === 'blocking') return true;
-      return issue.type === 'conflict' || issue.type === 'travel_shortage' || issue.type === 'anchor_violation' || issue.type === 'day_overflow';
-    });
     var linkedDay = dayIdForDate(editor.date);
     var coarseControls = '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-coarse' + (editor.coarseVisible ? ' checked' : '') + '><span><b>' + (editor.coarseVisible ? '粗流也顯示這項' : '只在細流') + '</b><small>' + (editor.coarseVisible ? '同一筆行程・' + h((dayMeta(linkedDay).label || linkedDay) + '・' + coarseSlotLabel(editor.coarseSlot)) : '適合交通、銜接與不需要出現在大方向的行程') + '</small></span></label>' +
       '<div class="ff-coarse-fields"' + (editor.coarseVisible ? '' : ' hidden') + '><label class="ff-field"><span>粗流時段</span><select data-ff-coarse-slot>' + coarseSlotOptions(editor.coarseSlot) + '</select></label><p class="ff-link-note">日期會跟著上方日期；粗流與細流共用名稱、備註與待辦。</p></div></section>';
@@ -1005,7 +892,9 @@
     var minDate = typeof TRIP !== 'undefined' && TRIP && TRIP.startDate || '';
     var maxDate = typeof TRIP !== 'undefined' && TRIP && TRIP.endDate || '';
     var editorFields = '<label class="ff-field"><span>日期</span><input type="date" data-ff-date value="' + h(editor.date) + '" min="' + h(minDate) + '" max="' + h(maxDate) + '"></label>' +
-      '<div class="ff-time-fields"><label class="ff-field"><span>開始</span><input type="time" data-ff-start value="' + h(editor.start) + '"></label><span aria-hidden="true">→</span><label class="ff-field"><span>結束</span><input type="time" data-ff-end value="' + h(editor.end) + '"></label></div>';
+      '<div class="ff-time-fields">' + renderTimePicker('data-ff-start', editor.start, '開始') +
+      '<p class="ff-time-span">' + h(timeSpanNote(duration)) + '</p>' +
+      renderTimePicker('data-ff-end', editor.end, '結束') + '</div>';
     var maps = mapsForOccurrence(item);
     var mapSection = '<section class="ff-editor-section"><h4>Maps</h4><div class="ff-detail-maps-list">' + (maps.length ? maps.map(function (link) {
       return '<a class="ff-detail-maps" href="' + h(link.url) + '" target="_blank" rel="noopener noreferrer"><span>' + h(link.label || '在 Google Maps 開啟') + '</span><span aria-hidden="true">↗</span></a>';
@@ -1015,9 +904,9 @@
     }).join('');
     var noteSection = '<section class="ff-editor-section"><label class="ff-field"><span>本次行程備註</span><textarea data-ff-notes maxlength="500" placeholder="' + h(editor.placeNote ? '卡片備註：' + editor.placeNote : '選填') + '">' + h(editor.notes) + '</textarea></label></section>';
     var todoSection = '<section class="ff-editor-section"><h4>待辦事項</h4><div class="ff-detail-todo-list">' + (todos || '<p class="ff-detail-missing">目前沒有待辦</p>') + '</div><div class="ff-todo-add"><input data-ff-detail-todo-text maxlength="120" placeholder="新增待辦"><button type="button" data-action="ff-detail-todo-add" data-eid="' + h(item.id) + '">新增</button></div></section>';
-    var transportSection = transportEditorFields(item, editor);
-    var placeSection = placeEditorFields(item, editor);
-    var coarsePlanning = coarsePlanningFields(item, editor);
+    // 進階＝平常不用碰的東西（Maps、地點資料、粗流顯示）；一級欄位只留名稱／移動方式／日期／時間／備註／待辦。
+    var advanced = '<details class="ff-rules ff-advanced"' + (editor.advancedOpen ? ' open' : '') + '><summary>進階</summary><div class="ff-rules-body">' +
+      mapSection + placeEditorFields(item, editor) + coarseControls + '</div></details>';
     var rules = '<details class="ff-rules"' + (editor.rulesOpen ? ' open' : '') + '><summary>更多設定</summary><div class="ff-rules-body">' +
       '<div class="ff-modes" role="tablist" aria-label="調整方式">' + [['single', '只改這項'], ['ripple', '連動後面'], ['swap', '交換行程']].map(function (mode) {
         return '<button type="button" role="tab" aria-selected="' + (editor.mode === mode[0]) + '" class="' + (editor.mode === mode[0] ? 'active' : '') + '" data-action="ff-mode" data-mode="' + mode[0] + '"' + (editor.firstSchedule && mode[0] !== 'single' ? ' disabled' : '') + '>' + mode[1] + '</button>';
@@ -1026,28 +915,17 @@
         return '<option value="' + h(candidate.id) + '"' + (candidate.id === editor.targetId ? ' selected' : '') + (!candidate.fine ? ' disabled' : '') + '>' + h(time + '｜' + kindLabel(candidate.scheduleKind) + '｜' + occurrenceTitle(candidate) + (candidate.fine && candidate.fine.fixedMarker ? '｜固定' : '')) + '</option>';
       }).join('') + '</select></label>' : '') +
       '<label class="ff-fixed-check"><input type="checkbox" data-ff-fixed' + (editor.fixedMarker ? ' checked' : '') + '><span>標記為固定行程</span></label>' +
-      '<div class="ff-rule-grid"><label class="ff-field"><span>可縮短性</span><select data-ff-compress><option value="none"' + (editor.compressibility === 'none' ? ' selected' : '') + '>不可縮短</option><option value="suggest"' + (editor.compressibility === 'suggest' ? ' selected' : '') + '>可建議縮短</option><option value="free"' + (editor.compressibility === 'free' ? ' selected' : '') + '>可自由縮短</option></select></label>' +
-      '<label class="ff-field"><span>最低分鐘</span><input type="number" inputmode="numeric" min="1" max="1440" data-ff-min value="' + h(editor.minDurationMin) + '"' + (editor.compressibility === 'none' ? ' disabled' : '') + '></label></div>' +
       '</div></details>';
     var notice = editor.notice ? '<div class="ff-preview-state notice" role="status">' + h(editor.notice) + '</div>' : '';
-    var issueGroups = '';
-    if (pendingIssues.length) {
-      issueGroups += '<section class="ff-issues ff-current-issues"><div class="ff-section-title">這次修改需要處理（' + pendingIssues.length + '）</div>' + pendingIssues.map(function (issue, index) { return issueCard(issue, index, transaction); }).join('') + '</section>';
-    } else if (transaction) {
-      issueGroups += '<div class="ff-no-issue">✓ 這次修改沒有新增需要處理的問題</div>';
-    }
-    if (preexistingIssues.length) {
-      issueGroups += '<details class="ff-rules ff-existing-issues"><summary>這天原本就有的提醒（' + preexistingIssues.length + '）</summary><div class="ff-rules-body">' + preexistingIssues.map(function (issue, index) { return issueCard(issue, index, transaction, { showResolutions: false }); }).join('') + '</div></details>';
-    }
-    if (handledIssues.length) {
-      issueGroups += '<details class="ff-rules ff-handled-issues"><summary>這次已決定或已處理（' + handledIssues.length + '）</summary><div class="ff-rules-body">' + handledIssues.map(function (issue, index) { return issueCard(issue, index, transaction, { showResolutions: false }); }).join('') + '</div></details>';
-    }
+    var hoursNotes = editorHoursWarnings(editor, item);
+    var hoursBlock = hoursNotes.length ?
+      '<section class="ff-hours-warning" role="alert"><b>' + h(editor.title || occurrenceTitle(item)) + '</b>' +
+        hoursNotes.map(function (text) { return '<span>' + h(text) + '</span>'; }).join('') + '</section>' : '';
     var preview = editor.previewing ? '<div class="ff-preview-state" role="status">正在檢查時間…</div>' :
-      editor.error ? '<div class="ff-preview-state error" role="alert">' + h(editor.error) + '</div>' :
-      issueGroups;
+      editor.error ? '<div class="ff-preview-state error" role="alert">' + h(editor.error) + '</div>' : '';
     var html = '<div class="ff-sheet ff-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-editor-title"><div class="ff-sheet-head"><span class="ff-kicker">編輯' + h(kindLabel(item.scheduleKind)) + '</span><h3 id="ff-editor-title">' + h(editor.title || occurrenceTitle(item)) + '</h3><p>粗流與細流共用這一頁；儲存後兩邊會同步更新。</p></div>' +
-      '<div class="ff-sheet-scroll">' + editorChangeSummary(editor, pendingIssues.length) + titleField + editorFields + coarseControls + transportSection + mapSection + noteSection + todoSection + placeSection + coarsePlanning + rules + notice + preview + '</div>' +
-      '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || blocking || !editor.title.trim() ? ' disabled' : '') + '>儲存</button></div></div>';
+      '<div class="ff-sheet-scroll">' + editorChangeSummary(editor) + hoursBlock + titleField + travelModeField(editor) + editorFields + noteSection + todoSection + advanced + rules + notice + preview + '</div>' +
+      '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || !editor.title.trim() ? ' disabled' : '') + '>儲存</button></div></div>';
     openSheet(html, function () { renderEditor(); }, 'fineflow-editor');
   }
 
@@ -1055,6 +933,7 @@
     var item = findOccurrence(id);
     if (!item) return;
     state.selectedId = id;
+    state.armedId = null;   // 開浮層就退出長按解鎖態
     var start = timeFromIso(item.fine && item.fine.startAt) || item.startTime || defaultTime(item.slot);
     var duration = minuteDuration(item) || 60;
     var place = item.placeId && typeof getPlace === 'function' ? getPlace(item.placeId) : null;
@@ -1069,15 +948,13 @@
       originalDate: fineDate(item), originalStart: start, originalEnd: timeFromIso(item.fine && item.fine.endAt) || addMinutesToTime(start, duration),
       durationMin: duration, firstSchedule: !item.fine,
       fixedMarker: !!(item.fine && item.fine.fixedMarker),
-      compressibility: item.fine && item.fine.compressibility || 'none',
-      minDurationMin: item.fine && item.fine.minDurationMin || duration,
       coarseVisible: !!(item.day && item.slot), coarseDay: item.day || dayIdForDate(fineDate(item)),
       coarseSlot: item.slot || slotFromTime(start),
       originalCoarseSlot: item.slot || slotFromTime(start),
       coarseOrder: Math.max(0, sameSlot.findIndex(function (entry) { return entry.id === item.id; })),
       coarsePk: !!(slotMeta && slotMeta.pk), backupIds: slotMeta && Array.isArray(slotMeta.backups) ? slotMeta.backups.slice(0, 2) : [],
-      transport: copy(item.transport || {}),
-      targetId: '', transaction: null, error: '', notice: '', previewing: false, rulesOpen: false
+      travelMode: item.travelMode || '',
+      targetId: '', transaction: null, error: '', notice: '', previewing: false, rulesOpen: false, advancedOpen: false
     };
     if (uiStore) {
       var guard = currentGuard();
@@ -1186,7 +1063,7 @@
       if (editedItem) {
         if (editedItem.custom) editedItem.custom.title = editor.title.trim();
         editedItem.notes = editor.notes || '';
-        if (isTransportOccurrence(editedItem)) editedItem.transport = copy(editor.transport || {});
+        editedItem.travelMode = editor.travelMode || '';
         applyCoarseEditorFields(next, editor, editedItem);
       }
       var inverse = typeof api.invertTransaction === 'function' && !transaction.manualFirstSchedule ? api.invertTransaction(transaction, next) : null;
@@ -1272,10 +1149,10 @@
     var raw = {
       id: typeof uid === 'function' ? uid() : 'ff_' + Date.now(), placeId: null,
       custom: { title: title, kind: 'life' }, day: null, slot: null, startTime: start,
-      fine: { startAt: startAt, endAt: endAt, originalDurationMin: duration, minDurationMin: duration,
-        compressibility: 'none', fixedMarker: !!(document.getElementById('ff_custom_fixed') || {}).checked,
-        timeCommitment: 'flexible', autoMovePolicy: 'manual', manualOrder: activePlan().length },
-      scheduleKind: 'custom', transport: null, todos: [], seq: activePlan().length
+      fine: { startAt: startAt, endAt: endAt, originalDurationMin: duration,
+        fixedMarker: !!(document.getElementById('ff_custom_fixed') || {}).checked,
+        manualOrder: activePlan().length },
+      scheduleKind: 'custom', travelMode: '', todos: [], seq: activePlan().length
     };
     var item = typeof CNXCore !== 'undefined' && typeof CNXCore.normalizeOccurrence === 'function' ? CNXCore.normalizeOccurrence(raw) : raw;
     if (!item) { toast('這筆行程的時間格式不正確'); return; }
@@ -1375,7 +1252,11 @@
     var end = draft.end || addMinutesToTime(start, 60);
     var minDate = typeof TRIP !== 'undefined' && TRIP && TRIP.startDate || '';
     var maxDate = typeof TRIP !== 'undefined' && TRIP && TRIP.endDate || '';
-    return '<label class="ff-field"><span>日期</span><input type="date" data-ff-create-date value="' + h(date) + '" min="' + h(minDate) + '" max="' + h(maxDate) + '"></label><div class="ff-time-fields"><label class="ff-field"><span>開始</span><input type="time" data-ff-create-start value="' + h(start) + '"></label><span aria-hidden="true">→</span><label class="ff-field"><span>結束</span><input type="time" data-ff-create-end value="' + h(end) + '"></label></div>';
+    var span = (minuteValue(end) - minuteValue(start) + 1440) % 1440;
+    return '<label class="ff-field"><span>日期</span><input type="date" data-ff-create-date value="' + h(date) + '" min="' + h(minDate) + '" max="' + h(maxDate) + '"></label>' +
+      '<div class="ff-time-fields">' + renderTimePicker('data-ff-create-start', start, '開始') +
+      '<p class="ff-time-span">' + h(timeSpanNote(span)) + '</p>' +
+      renderTimePicker('data-ff-create-end', end, '結束') + '</div>';
   }
 
   function creationCoarseFields(draft) {
@@ -1490,8 +1371,8 @@
       category: kind === 'custom' ? (values.category || '其他') : (place && place.type || values.category || '其他'),
       notes: values.notes || '',
       mapLinks: [],
-      fine: { startAt: zonedIso(values.date, values.start), endAt: zonedIso(values.date, values.end), originalDurationMin: duration, minDurationMin: duration, compressibility: 'none', fixedMarker: values.fixed, intentionalGapBefore: false, acceptedConflictWith: [], timeCommitment: values.fixed ? 'external' : 'flexible', autoMovePolicy: values.fixed ? 'manual' : 'auto', manualOrder: activePlan().length },
-      scheduleKind: kind === 'custom' ? 'custom' : 'place', transport: null, todos: [], seq: activePlan().length
+      fine: { startAt: zonedIso(values.date, values.start), endAt: zonedIso(values.date, values.end), originalDurationMin: duration, fixedMarker: values.fixed, manualOrder: activePlan().length },
+      scheduleKind: kind === 'custom' ? 'custom' : 'place', travelMode: '', todos: [], seq: activePlan().length
     };
     var occurrence = typeof CNXCore !== 'undefined' && typeof CNXCore.normalizeOccurrence === 'function' ? CNXCore.normalizeOccurrence(raw) : raw;
     if (!occurrence || !occurrence.fine) { showCreationError('這筆行程的資料格式不正確'); return; }
@@ -1632,12 +1513,12 @@
       tripEndDate: typeof TRIP !== 'undefined' && TRIP.endDate
     });
     state.importPreview = preview;
-    var summary = preview.transaction && preview.transaction.summary || { add: 0, update: 0, skipped: preview.skipped.length, needsInput: preview.needsInput.length, errors: preview.errors.length, conflicts: preview.conflicts.length };
+    var summary = preview.transaction && preview.transaction.summary || { add: 0, update: 0, skipped: preview.skipped.length, needsInput: preview.needsInput.length, errors: preview.errors.length };
     summary.update = summary.update || 0;
     var safeCount = summary.add + summary.update;
     var problems = preview.errors.concat(preview.needsInput).map(function (problem) { return '<li>' + h((problem.externalId ? problem.externalId + '：' : '') + problem.message) + '</li>'; }).join('');
     var partial = summary.errors || summary.needsInput ? '<p class="ff-import-warning">有 ' + (summary.errors + summary.needsInput) + ' 筆需要先修正；為避免粗流與細流斷開，本次不會寫入任何資料。</p>' : (summary.skipped ? '<p class="ff-import-warning">已略過 ' + summary.skipped + ' 筆先前匯入的資料。</p>' : '');
-    openSheet('<div class="ff-sheet ff-import-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-import-title"><div class="ff-sheet-head"><span class="ff-kicker">匯入預演</span><h3 id="ff-import-title">確認細流匯入</h3><p>沿用粗流 ' + summary.update + ' 筆・新增 ' + summary.add + ' 筆・衝突 ' + summary.conflicts + ' 筆</p></div><div class="ff-sheet-scroll">' + partial + (problems ? '<ul class="ff-import-problems">' + problems + '</ul>' : '<div class="ff-no-issue">✓ 每筆行程都已安全對應</div>') + '</div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-import-apply"' + (!preview.canApply ? ' disabled' : '') + '>確認匯入 ' + safeCount + ' 筆</button></div></div>', function () { openImportPreview(payload); }, 'fineflow-import');
+    openSheet('<div class="ff-sheet ff-import-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-import-title"><div class="ff-sheet-head"><span class="ff-kicker">匯入預演</span><h3 id="ff-import-title">確認細流匯入</h3><p>沿用粗流 ' + summary.update + ' 筆・新增 ' + summary.add + ' 筆</p></div><div class="ff-sheet-scroll">' + partial + (problems ? '<ul class="ff-import-problems">' + problems + '</ul>' : '<div class="ff-no-issue">✓ 每筆行程都已安全對應</div>') + '</div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-import-apply"' + (!preview.canApply ? ' disabled' : '') + '>確認匯入 ' + safeCount + ' 筆</button></div></div>', function () { openImportPreview(payload); }, 'fineflow-import');
     return preview;
   }
 
@@ -1684,6 +1565,7 @@
       if (!calendarIsDesktop() && (requested === 1 || requested === 2 || requested === 3)) state.mobileDayCount = requested;
       state.anchorDate = clampCalendarAnchor(calendarAnchor());
       state.selectedId = null;
+      state.armedId = null;
       renderFineFlow();
       return;
     }
@@ -1691,6 +1573,7 @@
       var step = calendarIsDesktop() ? calendarVisibleDays() : 1;
       state.anchorDate = clampCalendarAnchor(addDays(calendarAnchor(), action === 'ff-next-days' ? step : -step));
       state.selectedId = null;
+      state.armedId = null;
       renderFineFlow();
       return;
     }
@@ -1735,14 +1618,12 @@
       renderEditor();
       return;
     }
-    if (action === 'ff-conflict-single') {
-      if (state.editor && state.editor.pointerCompact) {
-        var singleItem = findOccurrence(state.editor.id);
-        var singleTransaction = acceptConflictTransaction(state.editor.transaction);
-        state.editor = null;
-        if (typeof closeSheet === 'function') closeSheet();
-        applyPointerTransaction(singleItem, singleTransaction);
-      } else acceptPreviewConflicts();
+    if (action === 'ff-conflict-single' && state.editor && state.editor.pointerCompact) {
+      var singleItem = findOccurrence(state.editor.id);
+      var singleTransaction = state.editor.transaction;
+      state.editor = null;
+      if (typeof closeSheet === 'function') closeSheet();
+      applyPointerTransaction(singleItem, singleTransaction);
       return;
     }
     if (action === 'ff-conflict-ripple' && state.editor) {
@@ -1751,15 +1632,9 @@
         var compactItem = findOccurrence(compactEditor.id);
         try {
           var rippleTransaction = previewPointerTransaction(compactEditor.pointerDraft, compactItem, 'ripple');
-          if (pointerNeedsDecision(rippleTransaction)) {
-            compactEditor.transaction = rippleTransaction;
-            compactEditor.error = '連動後仍碰到固定行程或無法安全移動的項目。';
-            renderPointerDecision();
-          } else {
-            state.editor = null;
-            if (typeof closeSheet === 'function') closeSheet();
-            applyPointerTransaction(compactItem, rippleTransaction);
-          }
+          state.editor = null;
+          if (typeof closeSheet === 'function') closeSheet();
+          applyPointerTransaction(compactItem, rippleTransaction);
         } catch (compactError) {
           compactEditor.error = compactError && compactError.message || '無法連動後面的行程';
           renderPointerDecision();
@@ -1800,6 +1675,7 @@
     }
     if (action === 'close' && sh && sh.querySelector('.ff-sheet')) {
       state.selectedId = null;
+      state.armedId = null;
       state.createDraft = null;
       state.editor = null;
       if (uiStore) uiStore.dispatch({ type: 'CANCEL' });
@@ -1846,29 +1722,6 @@
       runPreview();
       return;
     }
-    if (action === 'ff-resolution' && state.editor && state.editor.transaction) {
-      try {
-        var api = ffApi();
-        if (typeof api.applyResolution === 'function') {
-          var prior = state.editor.transaction;
-          var resolved = api.applyResolution(prior, target.dataset.id) || prior;
-          if (prior.manualFirstSchedule && resolved.afterSchedule) {
-            var scheduled = (resolved.afterSchedule.items || []).find(function (entry) { return entry.id === state.editor.id; });
-            var originalMutation = (prior.mutations || []).find(function (mutation) { return mutation.occurrenceId === state.editor.id; });
-            resolved.mutations = (resolved.mutations || []).filter(function (mutation) { return mutation.occurrenceId !== state.editor.id; });
-            if (scheduled && originalMutation) resolved.mutations.push({ occurrenceId: state.editor.id, before: originalMutation.before, after: copy(scheduled), reason: originalMutation.reason });
-            resolved.manualFirstSchedule = true;
-          }
-          state.editor.transaction = resolved;
-          if (uiStore && state.editor.pointerMode) uiStore.dispatch({ type: 'PREVIEW_READY', transaction: resolved });
-        }
-        renderEditor();
-      } catch (err) {
-        state.editor.error = err && err.message ? err.message : '這個修復目前無法套用';
-        renderEditor();
-      }
-      return;
-    }
     if (action === 'ff-apply') { applyEditorTransaction(); return; }
     if (action === 'ff-retry') { state.error = ''; renderFineFlow(); }
   });
@@ -1892,6 +1745,7 @@
     if (anchor && state.anchorDate !== anchor) {
       state.anchorDate = anchor;
       state.selectedId = null;
+      state.armedId = null;
     }
     calendar.dataset.anchorIndex = String(index);
     dates.forEach(function (date, dateIndex) {
@@ -1968,6 +1822,15 @@
 
   // ── 多日曆直接操作：座標計算與交易引擎間只透過 adapter 交接。 ──
   var POINTER_SNAP = 15;
+  // 模仿對象是 iOS 內建行事曆（長按事件→把手出現→拖把手改時長），Google Calendar 手機版根本沒有 resize，抄不了。
+  // 門檻本來抄平台預設（iOS UILongPressGestureRecognizer 0.5s／Android LONG_PRESS_TIMEOUT 500ms），
+  // 但 Vivian 真機實測「太久」→ 350ms：明顯短於平台預設，又仍在「刻意按住」的感知下限之上（低於約 300ms 會開始像誤觸）。
+  var POINTER_LONG_PRESS_MS = 350;
+  // 時間縮短本身就提高了誤觸機率，位移門檻不能跟著放寬：手指滑超過 10px 就當作要捲頁，取消長按（14px 太寬鬆）。
+  var POINTER_TOUCH_CANCEL_PX = 10;
+  var POINTER_AUTOSCROLL_MAX = 14;    // px/frame 上限
+  var POINTER_AUTOSCROLL_EDGE_MIN = 44;
+  var POINTER_AUTOSCROLL_EDGE_MAX = 88;
 
   function clamp(value, minimum, maximum) { return Math.max(minimum, Math.min(maximum, value)); }
   function minuteValue(time) { return +(time || '00:00').slice(0, 2) * 60 + +(time || '00:00').slice(3, 5); }
@@ -2013,31 +1876,45 @@
     return { scroll: root && root.querySelector('.ff-cal-scroll'), days: root ? Array.prototype.slice.call(root.querySelectorAll('.ff-cal-day[data-visible="true"]')) : [] };
   }
 
-  function dayAtPointer(clientX, parts) {
-    var days = parts.days;
+  function pointerGeometry(draft) {
+    if (draft && draft.geometry) return draft.geometry;
+    var parts = scrollAndDays();
+    var holder = parts.days[0] && parts.days[0].parentElement;
+    var geometry = {
+      scroll: parts.scroll,
+      days: parts.days,
+      scrollRect: parts.scroll ? parts.scroll.getBoundingClientRect() : null,
+      dayRects: parts.days.map(function (day) { return day.getBoundingClientRect(); }),
+      holderRect: holder ? holder.getBoundingClientRect() : null
+    };
+    if (draft) draft.geometry = geometry;
+    return geometry;
+  }
+
+  function dayAtPointer(clientX, geometry) {
+    var days = geometry.days;
     for (var i = 0; i < days.length; i++) {
-      var rect = days[i].getBoundingClientRect();
-      if (rect.width > 0 && clientX >= rect.left && clientX < rect.right) return days[i];
+      var rect = geometry.dayRects[i];
+      if (rect && rect.width > 0 && clientX >= rect.left && clientX < rect.right) return days[i];
     }
-    var holder = days[0] && days[0].parentElement;
-    var holderRect = holder && holder.getBoundingClientRect();
+    var holderRect = geometry.holderRect;
     var index = holderRect ? calendarColumnAt(clientX, holderRect.left, holderRect.width, days.length) : -1;
     return index >= 0 ? days[index] : null;
   }
 
-  function pointerPosition(clientX, clientY) {
-    var parts = scrollAndDays();
-    if (!parts.scroll || !parts.days.length) return { valid: false };
-    var scrollRect = parts.scroll.getBoundingClientRect();
-    var day = dayAtPointer(clientX, parts);
+  function pointerPosition(clientX, clientY, draft) {
+    var geometry = pointerGeometry(draft);
+    if (!geometry.scroll || !geometry.days.length) return { valid: false };
+    var scrollRect = geometry.scrollRect;
+    var day = dayAtPointer(clientX, geometry);
     var vertical = clientY >= scrollRect.top && clientY <= scrollRect.bottom;
     return {
       valid: !!day && vertical,
       day: day,
       date: day && day.dataset.date,
       dayId: day && day.dataset.day,
-      minute: minuteAtPointer(clientY, parts.scroll.scrollTop, scrollRect.top),
-      scroll: parts.scroll,
+      minute: minuteAtPointer(clientY, geometry.scroll.scrollTop, scrollRect.top),
+      scroll: geometry.scroll,
       scrollRect: scrollRect
     };
   }
@@ -2046,9 +1923,48 @@
     if (!draft) return;
     clearTimeout(draft.timer);
     if (draft.autoFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(draft.autoFrame);
+    if (draft.previewFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(draft.previewFrame);
+    draft.previewFrame = null;
     if (draft.ghost && draft.ghost.parentNode) draft.ghost.parentNode.removeChild(draft.ghost);
-    if (draft.card) draft.card.classList.remove('is-pointer-origin');
+    if (draft.card) draft.card.classList.remove('is-pointer-origin', 'is-pressing', 'is-lifted');
     document.body.classList.remove('ff-pointer-active');
+  }
+
+  // 退出「長按解鎖」態。刻意不走 renderFineFlow：解鎖態常常要在 pointerdown 當下退掉，
+  // 整頁重繪會把手勢正在用的 DOM 抽走（原 card／captureTarget 變成孤兒節點）。
+  function disarmCard() {
+    if (!state.armedId) return;
+    state.armedId = null;
+    var root = document.getElementById(rootId);
+    var card = root && root.querySelector('.ff-cal-card.is-armed');
+    if (!card) return;
+    card.classList.remove('is-armed');
+    Array.prototype.slice.call(card.querySelectorAll('.ff-cal-resize, .ff-cal-drag-handle'))
+      .forEach(function (handle) { if (handle.parentNode) handle.parentNode.removeChild(handle); });
+  }
+
+  // 退出解鎖態的那一下，只能用來退出——不可以順便執行它落點的動作（點到別張卡開詳情、點到空白格建立新行程）。
+  // pointerdown 只負責 disarm，後面跟著的 click 是獨立事件、預設會繼續傳到目標，所以要在 capture 階段先吃掉那一次。
+  // 手法與總覽的 suppressNextClick 一致：一次性攔截、逾時自清（沒有 click 跟上來時不留殘留旗標）。
+  // 只吃日曆容器內的 click：分頁、浮層等容器外的操作照常生效，不會被「剛好處於解鎖態」吞掉一次。
+  function suppressNextCalendarClick() {
+    var timer = null;
+    // 同時關掉 :active／tap highlight：click 被吃掉了，格子還閃一下會讓人以為真的點到（Vivian）。
+    document.body.classList.add('ff-disarming');
+    var done = function () {
+      document.removeEventListener('click', kill, true);
+      clearTimeout(timer);
+      document.body.classList.remove('ff-disarming');
+    };
+    var kill = function (event) {
+      var inCalendar = event.target.closest && event.target.closest('#' + rootId);
+      done();
+      if (!inCalendar) return;
+      event.stopPropagation();
+      event.preventDefault();
+    };
+    document.addEventListener('click', kill, true);
+    timer = setTimeout(done, 700);
   }
 
   function ensurePointerGhost(draft, day) {
@@ -2073,12 +1989,37 @@
     if (!draft || draft.active) return;
     draft.active = true;
     document.body.classList.add('ff-pointer-active');
-    if (draft.card) draft.card.classList.add('is-pointer-origin');
+    if (draft.card) {
+      draft.card.classList.remove('is-pressing');
+      // 觸發瞬間先跳一下（scale 1.02 ＋ 深陰影），接著才淡成拖曳來源＝「連續變化後的跳變」。
+      draft.card.classList.add('is-lifted', 'is-pointer-origin');
+    }
     try { draft.captureTarget.setPointerCapture(draft.pointerId); } catch (_) {}
+    // iOS Safari 沒有 Vibration API（唯一已知的 checkbox switch hack 也已被 iOS 26.5 封掉），
+    // 所以觸發回饋一律靠視覺；這行只有 Android Chrome 會真的震。
     if (draft.pointerType === 'touch' && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
       try { navigator.vibrate(10); } catch (_) {}
     }
     updatePointerPreview(draft.lastX, draft.lastY);
+  }
+
+  function schedulePointerPreview() {
+    var draft = pointerDraft;
+    if (!draft || !draft.active) return;
+    if (typeof requestAnimationFrame !== 'function') { updatePointerPreview(draft.lastX, draft.lastY); return; }
+    if (draft.previewFrame) return;
+    draft.previewFrame = requestAnimationFrame(function () {
+      draft.previewFrame = null;
+      if (pointerDraft !== draft || !draft.active) return;
+      updatePointerPreview(draft.lastX, draft.lastY);
+    });
+  }
+
+  function flushPointerPreview(draft) {
+    if (!draft || !draft.previewFrame) return;
+    if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(draft.previewFrame);
+    draft.previewFrame = null;
+    if (pointerDraft === draft && draft.active) updatePointerPreview(draft.lastX, draft.lastY);
   }
 
   function updatePointerPreview(clientX, clientY) {
@@ -2086,7 +2027,7 @@
     if (!draft || !draft.active) return;
     draft.lastX = clientX;
     draft.lastY = clientY;
-    var position = pointerPosition(clientX, clientY);
+    var position = pointerPosition(clientX, clientY, draft);
     var targetDay = position.day;
     var validDate = draft.mode === 'move' || !targetDay || targetDay.dataset.date === draft.sourceDate;
     var interval = pointerInterval(draft.mode, draft.anchorMinute, position.minute, draft.originalStart, draft.originalEnd, draft.grabOffset, draft.minimumDuration);
@@ -2098,18 +2039,35 @@
       end: interval.end
     };
     draft.didDrag = draft.didDrag || Math.abs(clientX - draft.startX) > 4 || Math.abs(clientY - draft.startY) > 4;
+    // 時間預覽 ghost 是「拖曳中」才該有的東西。手指還沒移動就畫，等於長按一滿 350ms 就有一塊比卡片還大的
+    // 藍框蓋住卡片（欄寬只有 92px，時間＋日期＋標題整條塞不下＝被截斷），放開才收——真機上就是
+    // 「跳出超大的時間、字超出框框、看不到資訊」。改成有位移才畫，長按放開進解鎖態時畫面只剩外框高亮＋把手。
+    if (!draft.didDrag) {
+      if (draft.ghost && draft.ghost.parentNode) draft.ghost.parentNode.removeChild(draft.ghost);
+      return;
+    }
     var ghost = ensurePointerGhost(draft, targetDay || draft.sourceDay);
     ghost.classList.toggle('is-invalid', !draft.preview.valid);
     var pixelsPerHour = calendarPixelsPerHour();
-    ghost.style.top = interval.start * pixelsPerHour / 60 + 'px';
-    ghost.style.height = Math.max(16, (interval.end - interval.start) * pixelsPerHour / 60) + 'px';
-    ghost.querySelector('.ff-cal-pointer-time').textContent = draft.preview.valid ? labelForMinute(interval.start) + '–' + labelForMinute(interval.end) : '不能放在這裡';
-    ghost.querySelector('strong').textContent = (draft.preview.date || draft.sourceDate) + (draft.mode === 'create' ? '・新增行程' : '・' + occurrenceTitle(findOccurrence(draft.itemId)));
+    var offset = interval.start * pixelsPerHour / 60;
+    var height = Math.max(16, (interval.end - interval.start) * pixelsPerHour / 60);
+    if (draft.ghostOffset !== offset) { ghost.style.transform = 'translateY(' + offset + 'px)'; draft.ghostOffset = offset; }
+    if (draft.ghostHeight !== height) { ghost.style.height = height + 'px'; draft.ghostHeight = height; }
+    var timeText = draft.preview.valid ? labelForMinute(interval.start) + '–' + labelForMinute(interval.end) : '不能放在這裡';
+    if (draft.ghostTimeText !== timeText) { ghost.querySelector('.ff-cal-pointer-time').textContent = timeText; draft.ghostTimeText = timeText; }
+    var labelText = (draft.preview.date || draft.sourceDate) + (draft.mode === 'create' ? '・新增行程' : '・' + draft.title);
+    if (draft.ghostLabelText !== labelText) { ghost.querySelector('strong').textContent = labelText; draft.ghostLabelText = labelText; }
     if (position.scroll) {
-      var edge = 52, speed = 0;
-      if (clientY < position.scrollRect.top + edge) speed = -Math.ceil((position.scrollRect.top + edge - clientY) / 4);
-      else if (clientY > position.scrollRect.bottom - edge) speed = Math.ceil((clientY - (position.scrollRect.bottom - edge)) / 4);
-      draft.autoSpeed = clamp(speed, -20, 20);
+      // 自動捲動：門檻用容器高度百分比（react-beautiful-dnd 的做法，固定 px 在小螢幕上太窄），
+      // 速度用二次 easing 並在「距真邊緣 8px」前就到頂速——使用者不必精準把手指貼在邊上。
+      var containerHeight = position.scrollRect.height || (position.scrollRect.bottom - position.scrollRect.top) || 0;
+      var edge = clamp(containerHeight * 0.12, POINTER_AUTOSCROLL_EDGE_MIN, POINTER_AUTOSCROLL_EDGE_MAX);
+      var depth = 0;
+      if (clientY < position.scrollRect.top + edge) depth = clientY - (position.scrollRect.top + edge);
+      else if (clientY > position.scrollRect.bottom - edge) depth = clientY - (position.scrollRect.bottom - edge);
+      var ratio = depth ? clamp(Math.abs(depth) / Math.max(1, edge - 8), 0, 1) : 0;
+      var speed = ratio ? (depth < 0 ? -1 : 1) * Math.max(1, Math.round(POINTER_AUTOSCROLL_MAX * ratio * ratio)) : 0;
+      draft.autoSpeed = clamp(speed, -POINTER_AUTOSCROLL_MAX, POINTER_AUTOSCROLL_MAX);
       if (draft.autoSpeed && !draft.autoFrame && typeof requestAnimationFrame === 'function') {
         draft.autoFrame = requestAnimationFrame(function autoScroll() {
           if (!pointerDraft || pointerDraft !== draft || !draft.active || !draft.autoSpeed) { draft.autoFrame = null; return; }
@@ -2123,7 +2081,8 @@
 
   function armPointerDraft(event, mode, source) {
     var item = source.item || null;
-    var position = pointerPosition(event.clientX, event.clientY);
+    var arming = { geometry: null };
+    var position = pointerPosition(event.clientX, event.clientY, arming);
     if (!position.day || !position.scroll) return;
     var start = item ? minuteValue(timeFromIso(item.fine.startAt)) : position.minute;
     var end = item ? minuteValue(timeFromIso(item.fine.endAt)) : Math.min(1440, start + POINTER_SNAP);
@@ -2139,31 +2098,45 @@
       originalEnd: end,
       anchorMinute: position.minute,
       grabOffset: mode === 'move' ? position.minute - start : 0,
-      minimumDuration: item && item.fine ? Math.max(POINTER_SNAP, +item.fine.minDurationMin || POINTER_SNAP) : POINTER_SNAP,
+      minimumDuration: POINTER_SNAP,
       startX: event.clientX,
       startY: event.clientY,
       lastX: event.clientX,
       lastY: event.clientY,
       active: false,
       didDrag: false,
+      immediate: !!source.immediate,
       card: source.card || null,
       captureTarget: source.captureTarget || event.target,
       timer: null,
       ghost: null,
       autoFrame: null,
-      autoSpeed: 0
+      autoSpeed: 0,
+      previewFrame: null,
+      geometry: arming.geometry,
+      title: item ? occurrenceTitle(item) : ''
     };
-    if (source.immediate && pointerDraft.pointerType === 'touch') {
-      activatePointerDraft(pointerDraft);
-    } else if (pointerDraft.pointerType === 'touch') {
-      pointerDraft.timer = setTimeout(function () {
-        if (pointerDraft && pointerDraft.pointerId === event.pointerId) activatePointerDraft(pointerDraft);
-      }, 450);
+    // 手機：卡片本體一律要長按 500ms 才進拖曳，按下即拖會讓每次誤觸都變成改時間、連正常捲動都做不到。
+    // 例外是把手（immediate）：手機上把手只有在「上一次手勢已結束、卡片進了 is-armed」之後才 render 出來，
+    // touch-action:none 的鎖定時機合法，所以按下即拖，不必再長按一次。
+    if (pointerDraft.pointerType === 'touch') {
+      if (pointerDraft.immediate) activatePointerDraft(pointerDraft);
+      else {
+        if (pointerDraft.card) pointerDraft.card.classList.add('is-pressing');
+        pointerDraft.timer = setTimeout(function () {
+          if (pointerDraft && pointerDraft.pointerId === event.pointerId) activatePointerDraft(pointerDraft);
+        }, POINTER_LONG_PRESS_MS);
+      }
     }
   }
 
   document.addEventListener('pointerdown', function (event) {
     if (event.button != null && event.button !== 0) return;
+    // 按在解鎖卡以外的任何地方＝退出解鎖態（含長按另一張卡）。
+    if (state.armedId && !(event.target.closest && event.target.closest('.ff-cal-card.is-armed'))) {
+      disarmCard();
+      suppressNextCalendarClick();   // 這一下只退出解鎖態，什麼都不做；要再點第二次才執行原本的動作。
+    }
     var dragHandle = event.target.closest('[data-action="ff-drag-card"]');
     if (dragHandle) {
       var dragItem = findOccurrence(dragHandle.dataset.eid);
@@ -2176,6 +2149,7 @@
     var resize = event.target.closest('[data-action="ff-resize-start"], [data-action="ff-resize-end"]');
     if (resize) {
       var resizeItem = findOccurrence(resize.dataset.eid);
+      if (resizeItem && resizeItem.fine && (event.pointerType || 'mouse') === 'touch') event.preventDefault();
       if (resizeItem && resizeItem.fine) armPointerDraft(event, resize.dataset.action === 'ff-resize-start' ? 'start' : 'end', { item: resizeItem, card: resize.closest('.ff-cal-card'), captureTarget: resize, date: fineDate(resizeItem), dayId: fineDayId(resizeItem), immediate: true });
       return;
     }
@@ -2186,7 +2160,9 @@
       return;
     }
     var slot = event.target.closest('.ff-cal-slot[data-action="ff-create-at"]');
-    if (slot) armPointerDraft(event, 'create', { captureTarget: slot, date: slot.dataset.date, dayId: slot.dataset.day });
+    if (slot && (event.pointerType || 'mouse') !== 'touch') {
+      armPointerDraft(event, 'create', { captureTarget: slot, date: slot.dataset.date, dayId: slot.dataset.day });
+    }
   });
 
   document.addEventListener('pointermove', function (event) {
@@ -2195,7 +2171,7 @@
     draft.lastX = event.clientX;
     draft.lastY = event.clientY;
     var distance = Math.max(Math.abs(event.clientX - draft.startX), Math.abs(event.clientY - draft.startY));
-    if (!draft.active && draft.pointerType === 'touch' && distance > 10) {
+    if (!draft.active && draft.pointerType === 'touch' && distance > POINTER_TOUCH_CANCEL_PX) {
       removePointerVisuals(draft);
       pointerDraft = null;
       return;
@@ -2203,16 +2179,13 @@
     if (!draft.active && draft.pointerType !== 'touch' && distance > 4) activatePointerDraft(draft);
     if (!draft.active) return;
     event.preventDefault();
-    updatePointerPreview(event.clientX, event.clientY);
+    // 第一次真的移動＝ghost 從無到有，同步畫出來（等下一幀會讓「開始拖」慢半拍）；之後才交給 rAF 節流。
+    if (!draft.didDrag) updatePointerPreview(event.clientX, event.clientY);
+    else schedulePointerPreview();
   }, { passive: false });
 
   function pointerRequest(draft, item) {
     var preview = draft.preview;
-    var sourceContext = contextForDay(draft.sourceDayId);
-    var targetContext = contextForDay(preview.dayId);
-    var contextByDay = {};
-    contextByDay[draft.sourceDayId] = sourceContext;
-    contextByDay[preview.dayId] = targetContext;
     return {
       versionId: activeVersion() && activeVersion().id,
       occurrenceId: item.id,
@@ -2229,12 +2202,6 @@
       newStartAt: zonedAtMinute(preview.date, preview.start),
       newEndAt: zonedAtMinute(preview.date, preview.end),
       fixedMarker: !!item.fine.fixedMarker,
-      compressibility: item.fine.compressibility,
-      minDurationMin: Math.min(preview.end - preview.start, Math.max(0, +item.fine.minDurationMin || 0)),
-      context: targetContext,
-      sourceContext: sourceContext,
-      targetContext: targetContext,
-      contextByDay: contextByDay,
       rules: { maxContinuousGapMin: 90 }
     };
   }
@@ -2259,10 +2226,28 @@
     return fallbackPreview(item, request, strategy || 'single', schedule);
   }
 
-  function pointerNeedsDecision(transaction) {
-    return transactionIssues(transaction).some(function (issue) {
-      if (issue.accepted || (issue.status !== 'new' && issue.status !== 'worsened')) return false;
-      return issue.type === 'conflict' || issue.severity === 'blocking';
+  function occurrenceRangeMs(item) {
+    if (!item || !item.fine) return null;
+    var start = Date.parse(item.fine.startAt), end = Date.parse(item.fine.endAt);
+    return isFinite(start) && isFinite(end) ? { start: start, end: end } : null;
+  }
+
+  // 拖完只問一件事：**這張卡**的新時間有沒有壓到後面的行程？會的話才讓她選「只移這項／連動後面」。
+  // 舊版是掃整天任意兩張相鄰卡有沒有重疊——她的資料本來就有同時段並排的卡（8/23、8/24、8/25 都有），
+  // 於是不管拖到哪個空檔都回 true，變成每次移動都被逼按一次沒意義的決策。
+  // 相鄰（前一項的結束 == 下一項的開始）不算重疊，只有嚴格重疊才問。
+  function pointerNeedsDecision(transaction, itemId) {
+    var items = transaction && transaction.afterSchedule && Array.isArray(transaction.afterSchedule.items) ?
+      transaction.afterSchedule.items : [];
+    var moved = null;
+    for (var i = 0; i < items.length; i++) if (items[i] && items[i].id === itemId) moved = items[i];
+    var movedRange = occurrenceRangeMs(moved);
+    if (!movedRange) return false;
+    return items.some(function (other) {
+      if (!other || other.id === itemId) return false;
+      var range = occurrenceRangeMs(other);
+      // 嚴格重疊才算；貼齊（前一項結束 == 下一項開始）不算。
+      return !!range && movedRange.start < range.end && range.start < movedRange.end;
     });
   }
 
@@ -2303,25 +2288,11 @@
     }
   }
 
-  function acceptConflictTransaction(transaction) {
-    var api = ffApi();
-    var next = transaction;
-    transactionIssues(next).filter(function (issue) {
-      return issue.type === 'conflict' && !issue.accepted && (issue.status === 'new' || issue.status === 'worsened');
-    }).forEach(function (issue) {
-      var resolution = (issue.resolutions || []).find(function (entry) { return (entry.action || entry.type || entry.id) === 'accept_conflict'; });
-      var resolutionId = resolution && (resolution.id || resolution.resolutionId || resolution.action || resolution.type);
-      if (resolutionId && typeof api.applyResolution === 'function') next = api.applyResolution(next, resolutionId) || next;
-    });
-    return next;
-  }
-
   function renderPointerDecision() {
     var editor = state.editor;
     var item = editor && findOccurrence(editor.id);
     if (!editor || !item) return;
-    var issues = transactionIssues(editor.transaction).filter(function (issue) { return issue.status !== 'resolved' && !issue.accepted; });
-    var description = issues.map(function (issue) { return issue.message || issueTitle(issue); }).join('；') || '這個時間會影響後面的行程。';
+    var description = '這個時間會壓到後面的行程。'; 
     var error = editor.error ? '<div class="ff-preview-state error" role="alert">' + h(editor.error) + '</div>' : '';
     openSheet('<div class="ff-sheet ff-pointer-decision" role="dialog" aria-modal="true" aria-labelledby="ff-pointer-title"><div class="ff-sheet-head"><span class="ff-kicker">時間衝突</span><h3 id="ff-pointer-title">要怎麼放這項行程？</h3><p>' + h(occurrenceTitle(item)) + '・' + h(labelForMinute(editor.pointerDraft.preview.start) + '–' + labelForMinute(editor.pointerDraft.preview.end)) + '</p></div><div class="ff-sheet-scroll"><p class="ff-pointer-explanation">' + h(description) + '</p>' + error + '<div class="ff-pointer-actions"><button type="button" data-action="ff-conflict-single"><b>只移這項</b><small>接受這次重疊並立即儲存</small></button><button type="button" class="primary" data-action="ff-conflict-ripple"><b>連動後面</b><small>把後面的可移動行程一起順延</small></button>' + (editor.error ? '<button type="button" data-action="ff-pointer-edit"><b>開啟完整編輯</b><small>查看日期、時間與進階設定</small></button>' : '') + '</div></div><div class="ff-sheet-actions one"><button type="button" data-action="close">取消移動</button></div></div>', function () { renderPointerDecision(); }, 'fineflow-pointer-decision');
   }
@@ -2363,6 +2334,7 @@
   function finishPointerDraft(event, cancelled) {
     if (!pointerDraft || pointerDraft.pointerId !== event.pointerId) return;
     var draft = pointerDraft;
+    flushPointerPreview(draft);
     pointerDraft = null;
     var preview = draft.preview;
     removePointerVisuals(draft);
@@ -2375,6 +2347,15 @@
         setTimeout(function () { if (state.suppressCardClick === draft.itemId) state.suppressCardClick = false; }, 0);
       }
     }
+    // 長按滿 500ms 但手指沒移動就放開＝不寫資料，讓這張卡進入解鎖態（模仿 iOS 內建行事曆：
+    // 長按到把手浮出來，再拖把手改時長）。只有這一張卡會長出把手。
+    if (!cancelled && draft.active && !draft.didDrag && draft.pointerType === 'touch' && draft.mode === 'move' && !draft.immediate && draft.itemId) {
+      state.armedId = draft.itemId;
+      state.suppressCardClick = draft.itemId;   // 這次 pointerup 後面跟著的 click 不該再開詳情
+      setTimeout(function () { if (state.suppressCardClick === draft.itemId) state.suppressCardClick = false; }, 0);
+      renderFineFlow();
+      return;
+    }
     if (cancelled || !draft.active || !draft.didDrag || !preview || !preview.valid) return;
     if (draft.mode === 'create') {
       openSourceMenu({ day: preview.dayId, date: preview.date, start: labelForMinute(preview.start), end: labelForMinute(preview.end) });
@@ -2385,7 +2366,7 @@
     if (draft.sourceDate === preview.date && draft.originalStart === preview.start && draft.originalEnd === preview.end) return;
     try {
       var transaction = previewPointerTransaction(draft, item, 'single');
-      if (pointerNeedsDecision(transaction)) openPointerDecision(draft, item, transaction);
+      if (pointerNeedsDecision(transaction, item.id)) openPointerDecision(draft, item, transaction);
       else applyPointerTransaction(item, transaction);
     } catch (error) {
       if (typeof toast === 'function') toast(error && error.message || '無法建立這次時間調整');
@@ -2395,12 +2376,26 @@
   document.addEventListener('pointerup', function (event) { finishPointerDraft(event, false); });
   document.addEventListener('pointercancel', function (event) { finishPointerDraft(event, true); });
   document.addEventListener('lostpointercapture', function (event) { finishPointerDraft(event, true); });
+  // iOS 鎖捲的唯一有效防線：pointermove 上的 preventDefault() 擋不住 iOS 捲動（捲動不是 pointer event 的
+  // default action），而 touchmove 上的 preventDefault() 有效、且不限第一個 touchmove——只要在「進入捲動模式
+  // 之前」呼叫即可。長按等待期間手指本來就靜止（動超過 10px 就取消長按），所以長按觸發時捲動模式還沒進入，
+  // 這裡一定來得及。CSS 那邊在手勢進行中改 touch-action 是無效的（WebKit 在手勢開始時就鎖定了）。
   document.addEventListener('touchmove', function (event) {
     if (!pointerDraft || !pointerDraft.active) return;
     event.preventDefault();
-    var touch = event.touches && event.touches[0];
-    if (touch) updatePointerPreview(touch.clientX, touch.clientY);
   }, { passive: false });
+
+  // 長按期間別讓 iOS 跳出選字／放大鏡／系統選單。
+  document.addEventListener('contextmenu', function (event) {
+    if (pointerDraft && pointerDraft.pointerType === 'touch') { event.preventDefault(); return; }
+    if (state.armedId && event.target.closest && event.target.closest('.ff-cal-card.is-armed')) event.preventDefault();
+  });
+
+  // 捲動＝退出解鎖態。這裡刻意聽「使用者手勢」而不是 scroll 事件：進解鎖態本身要重繪一次日曆，
+  // 重繪會還原捲動位置、程式化地打出一個 scroll 事件，聽 scroll 會讓解鎖態當場自己消失（真機才看得到）。
+  function disarmOnUserScroll() { if (state.armedId && !pointerDraft) disarmCard(); }
+  document.addEventListener('touchmove', disarmOnUserScroll, { passive: true });
+  document.addEventListener('wheel', disarmOnUserScroll, { passive: true });
 
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape' && pointerDraft) {
@@ -2416,10 +2411,11 @@
       openEditor(card.dataset.eid);
       return;
     }
-    if (event.key === 'Escape' && (state.createDraft || state.editor || state.selectedId)) {
+    if (event.key === 'Escape' && (state.createDraft || state.editor || state.selectedId || state.armedId)) {
       state.createDraft = null;
       state.editor = null;
       state.selectedId = null;
+      state.armedId = null;
       if (uiStore) uiStore.dispatch({ type: 'ESCAPE' });
       renderFineFlow();
     }
@@ -2461,9 +2457,6 @@
         state.editor.placeCard.cost.amount = event.target.value === '' ? null : Math.max(0, +event.target.value || 0);
       }
       return;
-    } else if (event.target.matches('[data-ff-transport-route]')) {
-      state.editor.transport.routeLabel = event.target.value;
-      return;
     } else if (event.target.matches('[data-ff-date]')) {
       state.editor.date = event.target.value;
       if (state.editor.coarseVisible) {
@@ -2476,14 +2469,11 @@
       if (state.editor.coarseVisible) state.editor.coarseSlot = slotFromTime(state.editor.start);
       var endInput = sh.querySelector('[data-ff-end]');
       if (endInput) endInput.value = state.editor.end;
+      syncTimePicker(sh.querySelector('.ff-timepick[data-ff-timepick="data-ff-end"]'), state.editor.end);   // 結束時間跟著平移，軌道也要跟上（只改視覺、不再 dispatch）
     } else if (event.target.matches('[data-ff-end]')) {
       state.editor.end = event.target.value;
       var date = state.editor.date, endDate = state.editor.end <= state.editor.start ? addDays(date, 1) : date;
       state.editor.durationMin = Math.round((Date.parse(zonedIso(endDate, state.editor.end)) - Date.parse(zonedIso(date, state.editor.start))) / 60000);
-      if (state.editor.minDurationMin > state.editor.durationMin) state.editor.minDurationMin = state.editor.durationMin;
-    } else if (event.target.matches('[data-ff-min]')) {
-      state.editor.minDurationMin = Math.max(1, Math.min(state.editor.durationMin, +event.target.value || 1));
-      state.editor.rulesOpen = true;
     }
     else return;
     state.editor.notice = '';
@@ -2504,7 +2494,6 @@
     if (!state.editor) return;
     if (event.target.matches('[data-ff-target]')) state.editor.targetId = event.target.value;
     else if (event.target.matches('[data-ff-fixed]')) { state.editor.fixedMarker = event.target.checked; state.editor.rulesOpen = true; }
-    else if (event.target.matches('[data-ff-compress]')) { state.editor.compressibility = event.target.value; state.editor.rulesOpen = true; }
     else if (event.target.matches('[data-ff-coarse]')) {
       state.editor.coarseVisible = event.target.checked;
       if (state.editor.coarseVisible) state.editor.coarseDay = dayIdForDate(state.editor.date);
@@ -2513,18 +2502,7 @@
     }
     else if (event.target.matches('[data-ff-coarse-day]')) { state.editor.coarseDay = event.target.value; renderEditor(); return; }
     else if (event.target.matches('[data-ff-coarse-slot]')) { state.editor.coarseSlot = event.target.value; renderEditor(); return; }
-    else if (event.target.matches('[data-ff-transport-from]')) { state.editor.transport.fromOccurrenceId = event.target.value || null; return; }
-    else if (event.target.matches('[data-ff-transport-to]')) { state.editor.transport.toOccurrenceId = event.target.value || null; return; }
-    else if (event.target.matches('[data-ff-transport-mode]')) { state.editor.transport.mode = event.target.value || null; return; }
-    else if (event.target.matches('[data-ff-place-choice]')) {
-      var nextPlace = typeof getPlace === 'function' ? getPlace(event.target.value) : null;
-      if (!nextPlace) return;
-      state.editor.placeId = nextPlace.id;
-      state.editor.placeCard = copy(nextPlace);
-      state.editor.title = nextPlace.name || state.editor.title;
-      renderEditor();
-      return;
-    }
+    else if (event.target.matches('[data-ff-travel-mode]')) { state.editor.travelMode = event.target.value || ''; return; }
     else if (event.target.matches('[data-ff-place-area]')) { if (state.editor.placeCard) state.editor.placeCard.area = event.target.value; return; }
     else if (event.target.matches('[data-ff-place-type]')) { if (state.editor.placeCard) state.editor.placeCard.type = event.target.value; return; }
     else if (event.target.matches('[data-ff-place-per]')) {
@@ -2535,20 +2513,15 @@
       return;
     }
     else if (event.target.matches('[data-ff-place-tier]')) { if (state.editor.placeCard) state.editor.placeCard.tier = +event.target.value || 0; return; }
-    else if (event.target.matches('[data-ff-coarse-order]')) { state.editor.coarseOrder = +event.target.value || 0; return; }
-    else if (event.target.matches('[data-ff-coarse-pk]')) { state.editor.coarsePk = event.target.checked; return; }
-    else if (event.target.matches('[data-ff-coarse-backup]')) {
-      state.editor.backupIds[+event.target.dataset.ffCoarseBackup || 0] = event.target.value || null;
-      state.editor.backupIds = state.editor.backupIds.filter(Boolean).slice(0, 2);
-      return;
-    }
     else return;
     state.editor.notice = '';
     runPreview();
   });
 
   document.addEventListener('toggle', function (event) {
-    if (state.editor && event.target.matches && event.target.matches('.ff-rules')) state.editor.rulesOpen = event.target.open;
+    if (!state.editor || !event.target.matches) return;
+    if (event.target.matches('.ff-advanced')) state.editor.advancedOpen = event.target.open;
+    else if (event.target.matches('.ff-rules')) state.editor.rulesOpen = event.target.open;
   }, true);
 
   window.renderFineFlow = renderFineFlow;
@@ -2561,16 +2534,20 @@
     openDetail: openOccurrenceDetail,
     openAddSource: function () { openSourceMenu({}); },
     openImport: openImportPreview,
+    initTimePickers: initTimePickers,
+    renderTimePicker: renderTimePicker,
     pointerMath: {
       snapMinute: snapPointerMinute,
       minuteAtPointer: minuteAtPointer,
       columnAt: calendarColumnAt,
       interval: pointerInterval,
-      labelForMinute: labelForMinute
+      labelForMinute: labelForMinute,
+      needsDecision: pointerNeedsDecision
     },
     resetTransient: function () {
       state.createDraft = null;
       state.selectedId = null;
+      state.armedId = null;
       state.editor = null;
       state.importPreview = null;
       if (uiStore) uiStore.dispatch({ type: 'CANCEL' });
