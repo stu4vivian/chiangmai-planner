@@ -882,6 +882,52 @@
   /* 細流編輯共用既有 overlay/sheet；手機維持局部高度，底下日期與時間軸仍看得到。 */
   .sheet:has(.ff-sheet){padding:0;overflow:hidden;max-height:72dvh;}
   .ff-sheet{display:flex;flex-direction:column;width:100%;max-height:72dvh;min-height:0;overflow:hidden;}
+  /* 編輯卡：半高起手（背後還看得到行事曆），拉把手或展開選擇器才拉滿。 */
+  /* 高度由把手拖曳決定（JS 寫 inline max-height，下限半高、上限 92dvh）；這裡只給起手值。
+     .sheet 必須是 flex 容器：內層 .ff-sheet 才拿得到「有界」高度，.ff-sheet-scroll 才捲得動。 */
+  .sheet:has(.ff-editor-sheet){max-height:70dvh;display:flex;flex-direction:column;}
+  .sheet:has(.ff-editor-sheet) .ff-editor-sheet{flex:1;min-height:0;max-height:none;}
+  .ff-grab{flex:none;display:block;width:100%;height:22px;border:0;background:transparent;padding:0;cursor:grab;touch-action:none;}
+  .ff-grab::before{content:'';display:block;width:34px;height:4px;margin:9px auto 0;border-radius:2px;background:#e0e0e3;}
+  .ff-editor-sheet .ff-sheet-scroll{padding-top:2px;}
+  .sheet:has(.ff-editor-sheet)>.sheetclose{display:none;}   /* 半高 sheet 的右上✕跟拿把手打架；取消鍵就在底下 */
+  /* 一列＝開始／結束 + 日期格 + 時間格（點格子才展開選擇器） */
+  .sheet input.ff-title-input{width:100%;min-width:0;margin:2px 0 4px;border:0;border-bottom:1px solid transparent;border-radius:0;padding:4px 0;background:transparent;color:var(--ink);font:500 19px var(--ff);letter-spacing:-.01em;}
+  .sheet input.ff-title-input:focus{outline:0;border-bottom-color:var(--ink);}
+  .ff-time-block{margin:2px 0 0;}
+  .ff-time-row{display:flex;align-items:center;justify-content:flex-end;gap:7px;padding:5px 0;border-top:.5px solid var(--line);}
+  .ff-time-key{margin-right:auto;font-size:14.5px;color:var(--ink2);}
+  .ff-time-pill{min-height:36px;border:0;border-radius:7px;padding:5px 9px;background:transparent;color:var(--ink);font:16px var(--ff);font-variant-numeric:tabular-nums;cursor:pointer;}
+  .ff-time-pill.open{background:var(--accent-wash);font-weight:600;}
+  .ff-pick-open{border-top:.5px solid var(--line);padding:6px 0 2px;}
+  .ff-pick-open:has(.ff-date-chip){display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .ff-pick-open:has(.ff-date-chip)::-webkit-scrollbar{display:none;}
+  .ff-date-chip{flex:none;min-height:38px;border:1px solid var(--line);border-radius:var(--r-pill);padding:7px 13px;background:#fff;color:var(--ink2);font:14px var(--ff);font-variant-numeric:tabular-nums;white-space:nowrap;cursor:pointer;}
+  .ff-date-chip.on{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .ff-map-row{display:flex;flex-wrap:wrap;gap:7px;padding:10px 0;border-top:.5px solid var(--line);}
+  .ff-map-btn{flex:1 1 auto;min-height:40px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:9px;padding:0 12px;background:#fff;color:var(--ink);font:600 13.5px var(--ff);text-decoration:none;white-space:nowrap;cursor:pointer;}
+  .ff-fact-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:10px 0;border-top:.5px solid var(--line);font-size:14px;color:var(--ink2);}
+  .ff-fact-row b{font-size:14px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;}
+  .ff-delete-row{display:block;width:100%;margin-top:6px;padding:13px 0;border:0;border-top:.5px solid var(--line);background:transparent;color:var(--danger);font:600 14px var(--ff);text-align:left;cursor:pointer;}
+  /* 待辦左滑刪除：紅底在容器上（滑多遠都連續、不露白縫），圓角＋內縮，別像一整條血。 */
+  .ff-todo-swipe{position:relative;overflow:hidden;border-radius:10px;}
+  .ff-todo-swipe.swiping,.ff-todo-swipe.del-armed{background:var(--danger);}
+  .ff-todo-swipe.del-armed{background:#a3302c;}
+  .ff-todo-del{position:absolute;inset:0;z-index:0;display:flex;align-items:center;justify-content:flex-end;padding:0 18px;border:0;background:transparent;color:#fff;font:600 13.5px var(--ff);letter-spacing:.04em;cursor:pointer;}
+  .ff-todo-swipe .ff-todo-row{position:relative;z-index:1;background:#fff;padding-left:2px;padding-right:2px;touch-action:pan-y;}
+  .ff-todo-swipe:not(.swiping) .ff-todo-row{transition:transform .18s;}
+  /* 疊在原畫面中間的小視窗（不換掉底下那張卡） */
+  .ff-mini-back{position:fixed;inset:0;z-index:1500;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(18,18,28,.34);}
+  .ff-mini{width:100%;max-width:290px;border-radius:14px;padding:20px 18px 14px;background:#fff;box-shadow:var(--sh-pop);text-align:center;}
+  .ff-mini h3{margin:0 0 6px;font-size:16px;font-weight:600;letter-spacing:-.01em;}
+  .ff-mini p{margin:0 0 16px;font-size:13px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere;}
+  .ff-mini-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .ff-mini-actions button{min-height:44px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink2);font:600 14px var(--ff);cursor:pointer;}
+  .ff-mini-actions button.danger{border-color:var(--danger);background:var(--danger);color:#fff;}
+  .ff-confirm-actions{display:flex;flex-direction:column;gap:8px;padding:4px 0 8px;}
+  .ff-confirm-actions button{min-height:46px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);font:600 14px var(--ff);cursor:pointer;}
+  .ff-confirm-actions button.primary{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .ff-confirm-actions button.danger{color:var(--danger);}
   .ff-sheet-head{flex:none;padding:15px 48px 10px 16px;border-bottom:.5px solid var(--line);}
   .ff-sheet-head h3{font-size:17px;line-height:1.2;margin:2px 0 0;letter-spacing:-.01em;}
   .ff-sheet-head p{font-size:11px;line-height:1.4;color:var(--muted);margin:4px 0 0;}
@@ -896,21 +942,20 @@
   .ff-current small{font-size:10px;color:var(--muted);text-align:right;}
   /* 開始／結束各自佔滿寬度的橫向滑動選擇器→上下堆疊（原本三欄 grid 的 → 換成中間的時長小字）。 */
   .ff-time-fields{display:block;margin-bottom:12px;}
-  .ff-time-span{margin:5px 0;text-align:center;font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums;}
+  .ff-time-span{margin:6px 0;text-align:center;font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums;}
+  /* 時間滾輪：直式兩欄（iOS 行事曆模式）。一格 38px、上下各露兩格，選中列是一道橫跨兩欄的淺底 pill。 */
   .ff-timepick{display:block;min-width:0;}
-  .ff-timepick-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 5px;}
-  .ff-timepick-head>span{font-size:10.5px;font-weight:700;color:var(--muted);}
-  .ff-timepick-head>b{font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
-  .ff-timepick-rails{--tp-item:56px;position:relative;border:1px solid var(--line);border-radius:var(--r-md);background:#fff;overflow:hidden;}
-  /* 貫穿時／分兩列的中央窗口；pointer-events 一定要關，否則會吃掉點格子的點擊。 */
-  .ff-timepick-window{position:absolute;left:50%;transform:translateX(-50%);top:3px;bottom:3px;width:var(--tp-item);border:1px solid var(--ink);border-radius:var(--r-sm);pointer-events:none;}
-  .ff-timepick-rail{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x;scrollbar-width:none;scroll-behavior:auto;}
+  .ff-timepick-label{font-size:10.5px;font-weight:700;color:var(--muted);margin:0 0 5px;}
+  .ff-timepick-rails{--tp-item:30px;position:relative;height:calc(var(--tp-item)*5);max-width:200px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;background:#fff;overflow:hidden;}
+  /* 選中列的底色；pointer-events 一定要關，否則會吃掉點格子的點擊。 */
+  .ff-timepick-window{position:absolute;left:0;right:0;top:calc(var(--tp-item)*2);height:var(--tp-item);border-radius:var(--r-pill);background:var(--surface-2);pointer-events:none;}
+  .ff-timepick-rail{position:relative;overflow-y:auto;overflow-x:hidden;scroll-snap-type:y mandatory;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y;scrollbar-width:none;scroll-behavior:auto;}
   .ff-timepick-rail::-webkit-scrollbar{display:none;}
   .ff-timepick-rail:focus-visible{outline:0;background:rgba(28,28,32,.04);}
-  /* 頭尾兩格也要能滾到中央＝左右各補半個視窗寬。 */
-  .ff-timepick-track{display:flex;padding-inline:calc(50% - var(--tp-item)/2);}
-  .ff-timepick-track>button{flex:0 0 var(--tp-item);min-height:44px;scroll-snap-align:center;border:0;background:transparent;padding:0;font:16px var(--ff);font-variant-numeric:tabular-nums;color:var(--faint);cursor:pointer;}
-  .ff-timepick-track>button[aria-selected="true"]{color:var(--ink);font-weight:700;}
+  /* 頭尾兩格也要能滾到中央＝上下各補兩格高。 */
+  .ff-timepick-track{display:block;padding-block:calc(var(--tp-item)*2);}
+  .ff-timepick-track>button{display:block;width:100%;height:var(--tp-item);scroll-snap-align:center;border:0;background:transparent;padding:0;font:14px var(--ff);font-variant-numeric:tabular-nums;color:var(--faint);cursor:pointer;}
+  .ff-timepick-track>button[aria-selected="true"]{color:var(--ink);font-size:17px;font-weight:600;}
   .ff-field{display:block;min-width:0;margin:0 0 11px;}
   .ff-field>span{display:block;font-size:10.5px;font-weight:700;color:var(--muted);margin:0 0 5px;}
   .sheet .ff-field input,.sheet .ff-field select,.sheet .ff-field textarea{width:100%;min-width:0;min-height:44px;margin:0;border:1px solid var(--line);border-radius:9px;padding:9px 10px;background:#fff;color:var(--ink);font:16px var(--ff);font-variant-numeric:tabular-nums;}
@@ -957,6 +1002,7 @@
   .ff-change-head>span{font-size:10.5px;font-weight:700;color:var(--muted);white-space:nowrap;}
   /* 營業時間提醒：講事實的醒目紅字（沿用 --danger 錯誤色，不另開新色） */
   .ff-hours-warning{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:10px 0 2px;padding:10px 11px;border-radius:9px;background:#f9e9e7;color:var(--danger);font-size:12.5px;font-weight:800;line-height:1.4;}
+  .ff-hours-warning[hidden]{display:none;}   /* display:flex 會蓋過 UA 的 [hidden]，不寫這行就是一條空的粉色粗條 */
   .ff-hours-warning b{font-size:12.5px;font-weight:800;}
   .ff-hours-warning span{font-size:12.5px;font-weight:800;}
   .ff-no-issue{margin-top:12px;padding:10px 11px;border-radius:9px;background:#eaf3ed;color:var(--ok);font-size:11px;font-weight:700;}
@@ -997,7 +1043,7 @@
     .ff-day{margin-bottom:26px;}
     .ff-item{grid-template-columns:62px 24px minmax(0,1fr) auto;gap:10px;padding:8px 0;}
     .ff-item-title{font-size:13.5px;}
-    .ff-timepick-rails{--tp-item:64px;}   /* 桌機格子放大；snap 保留＝滑鼠點格子仍然自動對中 */
+    .ff-timepick-rails{--tp-item:34px;}   /* 桌機格子放大；snap 保留＝滑鼠點格子仍然自動對中 */
   }
 
   @media(min-width:1100px){
@@ -1448,6 +1494,8 @@
     .ff-cal-fab{right:14px;bottom:14px;}
     .sheet:has(.ff-sheet){max-height:min(78dvh,660px);}
     .ff-sheet{max-height:min(78dvh,660px);}
+    .sheet:has(.ff-editor-sheet){max-height:70dvh;}   /* 編輯卡起手七成高；把手拖曳會寫 inline max-height 蓋過 */
+    .ff-editor-sheet{max-height:none;}
     .ff-detail-sheet{height:min(78dvh,660px);}
   }
 

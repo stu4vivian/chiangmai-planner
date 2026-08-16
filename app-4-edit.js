@@ -406,7 +406,8 @@ document.addEventListener('click',e=>{
   if(a==='close'){ closeSheet(); return; }
 });
 // ── 左滑刪除（pointer events＝手機觸控＋桌機滑鼠通用）：抽成共用，換將候選＋住宿規劃多飯店列共用 ──
-function initSwipeDelete(rowSel, bodySel, actSel, ignoreSel){
+function initSwipeDelete(rowSel, bodySel, actSel, ignoreSel, ratio){
+  const need = ratio || .5;   // 要滑過列寬的幾成才算確認（候選／住宿列維持 .5＝Vivian 要更長；待辦列短一點）
   let sw=null;
   document.addEventListener('pointerdown',e=>{
     const row=e.target.closest(rowSel); if(!row) return;
@@ -422,17 +423,18 @@ function initSwipeDelete(rowSel, bodySel, actSel, ignoreSel){
       sw.horiz=true; sw.row.classList.add('swiping'); }
     sw.dx=Math.max(-sw.w,Math.min(0,dx));
     sw.body.style.transform='translateX('+sw.dx+'px)';
-    sw.row.classList.toggle('del-armed', sw.dx < -sw.w*0.5);          // 過半個列寬＝放開就刪（紅塊變深提示）
+    sw.row.classList.toggle('del-armed', sw.dx < -sw.w*need);          // 過門檻＝放開就刪（紅塊變深提示）
     e.preventDefault();
   },{passive:false});
   function endSwipe(){ if(!sw) return; const s=sw; sw=null; s.row.classList.remove('swiping','del-armed');
-    if(s.dx < -s.w*0.5){ const act=s.row.querySelector(actSel); if(act) act.click(); }   // 要滑過半個列寬才算確認刪除（給反悔空間，Vivian）
+    if(s.dx < -s.w*need){ const act=s.row.querySelector(actSel); if(act) act.click(); }   // 要滑過門檻才算確認刪除（給反悔空間，Vivian）
     else s.body.style.transform=''; }                                                     // 沒過＝彈回
   document.addEventListener('pointerup',endSwipe);
   document.addEventListener('pointercancel',endSwipe);
 }
 initSwipeDelete('.op-cand.bak','.cand-body','.cand-del','.swap,.cand-del');   // 換將候選（拔 ✕、改左滑含桌機）
 initSwipeDelete('.bhrow.swrow','.bh-body','.bh-del','.bhgrip,.bh-del');        // 住宿規劃多飯店列（Vivian #2b 版C）
+initSwipeDelete('.ff-todo-swipe','.ff-todo-row','.ff-todo-del','.ff-todo-del',.3);   // 細流編輯卡的待辦列（Vivian 2026-08-16：待辦要能刪、且不用滑那麼遠）
 // ── 住宿規劃多飯店列「握把拖曳排序」：拖動即時換 DOM 順序、放手套用 reorderRegionHotels ──
 (function(){
   let dg=null;

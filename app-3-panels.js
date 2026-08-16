@@ -97,7 +97,7 @@ function openSheet(html, reopen, key){
   const samePlace = key && key===curKey, box = samePlace && sheetScrollBox();
   const keepOuter = samePlace ? sh.scrollTop : 0, keepInner = box ? box.scrollTop : 0;
   if(document.body.classList.contains('sheet-open') && curReopen && key!==curKey) navStack.push(curReopen);   // 在父層上開「不同的」子窗→自動記住回父層（同 key＝原地重繪不記；父層自己登記 curReopen，任何子窗都涵蓋、不漏）
-  sh.classList.remove('sheet-edit','sheet-picker','pk2','tall','sheet-cfg'); document.body.classList.remove('cardpeek','peek-edit'); ['pkDay','pkSlot','pkMode','omPid','omMove','omDay','omSlot','opEid','dsPid','dsMove','wkKind','wkKey','emCat'].forEach(k=>delete sh.dataset[k]); sh.innerHTML='<button class="sheetclose" data-action="close" aria-label="關閉">✕</button>'+html; ov.classList.add('on'); document.body.classList.add('sheet-open');
+  sh.classList.remove('sheet-edit','sheet-picker','pk2','tall','ff-tall','sheet-cfg'); document.body.classList.remove('cardpeek','peek-edit'); ['pkDay','pkSlot','pkMode','omPid','omMove','omDay','omSlot','opEid','dsPid','dsMove','wkKind','wkKey','emCat'].forEach(k=>delete sh.dataset[k]); sh.innerHTML='<button class="sheetclose" data-action="close" aria-label="關閉">✕</button>'+html; ov.classList.add('on'); document.body.classList.add('sheet-open');
   if(samePlace){ sh.scrollTop=keepOuter; const nb=sheetScrollBox(); if(nb) nb.scrollTop=keepInner; }
   if(window.CNXFineFlowUI&&typeof window.CNXFineFlowUI.initTimePickers==='function'&&sh.querySelector('[data-ff-timepick]')) window.CNXFineFlowUI.initTimePickers(sh);   // 滑動時間選擇器的 listener 每次 innerHTML 都被清掉，統一在這裡接回來（同 resetTransient 的 hook 模式）
   curReopen=reopen||null; curKey=key||null;   // 登記「怎麼重開現在這個畫面」（過場/葉子不傳＝不可被返回）

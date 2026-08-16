@@ -137,13 +137,14 @@
   function timePickRail(el, unit) { return el.querySelector('.ff-timepick-rail[data-unit="' + unit + '"]'); }
   function timePickItems(rail) { return (rail && rail.firstElementChild && rail.firstElementChild.children) || []; }
 
+  // 直式滾輪（iOS 行事曆模式）：量的是每一格的「高度」，捲的是 scrollTop。
   function timePickItemWidth(rail) {
     var first = timePickItems(rail)[0];
     if (!first) return 0;
-    return first.offsetWidth || (first.getBoundingClientRect && first.getBoundingClientRect().width) || 0;
+    return first.offsetHeight || (first.getBoundingClientRect && first.getBoundingClientRect().height) || 0;
   }
 
-  // aria-selected 是這個元件唯一的「目前選到哪格」真相：捲動時由 scrollLeft 換算後寫進去，提交時再讀回來。
+  // aria-selected 是這個元件唯一的「目前選到哪格」真相：捲動時由 scrollTop 換算後寫進去，提交時再讀回來。
   function timePickSelected(rail) {
     var items = timePickItems(rail);
     for (var i = 0; i < items.length; i++) if (items[i].getAttribute('aria-selected') === 'true') return i;
@@ -175,7 +176,7 @@
       if (!rail) { placed = false; return; }
       timePickMark(rail, pair[1]);
       var width = timePickItemWidth(rail);
-      if (width > 0) rail.scrollLeft = pair[1] * width; else placed = false;
+      if (width > 0) rail.scrollTop = pair[1] * width; else placed = false;
     });
     el.dataset.tpQuiet = String(Date.now() + 200);   // 程式化捲動會回彈出額外 scroll 事件，靜音一小段避免自我提交迴圈
     timePickReadout(el, value);
@@ -186,9 +187,8 @@
     var indexes = timePickIndexes(value), hours = '', minutes = '', i;
     for (i = 0; i < 24; i++) hours += '<button type="button" role="option" tabindex="-1" data-index="' + i + '" aria-selected="' + (i === indexes.hour) + '">' + padTwo(i) + '</button>';
     for (i = 0; i < TIME_MINUTE_COUNT; i++) minutes += '<button type="button" role="option" tabindex="-1" data-index="' + i + '" aria-selected="' + (i === indexes.minute) + '">' + padTwo(i * TIME_STEP) + '</button>';
+    // hidden input 不再住在元件裡：時間格收合時滾輪不 render，但 hidden input 要一直在（相容層＋測試）。
     return '<div class="ff-timepick" data-ff-timepick="' + h(attr) + '" data-value="' + h(value) + '">' +
-      '<div class="ff-timepick-head"><span>' + h(label) + '</span><b data-tp-readout>' + h(value) + '</b></div>' +
-      '<input type="hidden" ' + attr + ' value="' + h(value) + '">' +
       '<div class="ff-timepick-rails">' +
         '<div class="ff-timepick-window" aria-hidden="true"></div>' +
         '<div class="ff-timepick-rail" data-unit="hour" tabindex="0" role="listbox" aria-label="' + h(label) + '小時"><div class="ff-timepick-track">' + hours + '</div></div>' +
@@ -197,10 +197,17 @@
   }
 
   // 外部（例如「改開始時間→結束等量平移」）要更新畫面時走這裡：只改視覺與 hidden input，不再 dispatch。
+  function timePickInput(el) {
+    var attr = el && el.dataset && el.dataset.ffTimepick;
+    if (!attr) return null;
+    var root = (typeof sh !== 'undefined' && sh) || (typeof document !== 'undefined' ? document : null);
+    return root && root.querySelector ? root.querySelector('[' + attr + ']') : null;
+  }
+
   function syncTimePicker(el, value) {
     if (!el || el.dataset.tpTouch === 'true') return;   // 使用者手指還在上面就別動它
     el.dataset.value = value;
-    var input = el.querySelector('input');
+    var input = timePickInput(el);
     if (input) input.value = value;
     timePickPlace(el, value);
   }
@@ -212,7 +219,7 @@
       var value = timePickCurrent(el);
       if (!value || value === el.dataset.value) return;   // 防迴圈護欄：值沒變就不發事件（iOS snap 回彈會多打 scroll）
       el.dataset.value = value;
-      var input = el.querySelector('input');
+      var input = timePickInput(el);
       if (!input) return;
       input.value = value;                                              // 順序不可反：先寫 value
       input.dispatchEvent(new Event('input', { bubbles: true }));       // 再 dispatch（hidden input 不會自己發）
@@ -223,7 +230,7 @@
         var rail = timePickRail(el, unit);
         var width = rail && timePickItemWidth(rail);
         if (!(width > 0)) return;
-        timePickMark(rail, clamp(Math.round(rail.scrollLeft / width), 0, timePickItems(rail).length - 1));
+        timePickMark(rail, clamp(Math.round(rail.scrollTop / width), 0, timePickItems(rail).length - 1));
       });
       timePickReadout(el, timePickCurrent(el) || el.dataset.value);
     }
@@ -241,7 +248,7 @@
       el.dataset.tpQuiet = String(Date.now() + (smooth ? 400 : 200));
       if (width > 0) {
         if (smooth) rail.style.scrollBehavior = 'smooth';
-        rail.scrollLeft = index * width;
+        rail.scrollTop = index * width;
         if (smooth) setTimeout(function () { rail.style.scrollBehavior = 'auto'; }, 280);
       }
       timePickReadout(el, timePickCurrent(el));
@@ -256,8 +263,8 @@
       if (typeof window !== 'undefined' && 'onscrollend' in window) rail.addEventListener('scrollend', function () { clearTimeout(settleTimer); repaint(); commit(); });
       rail.addEventListener('keydown', function (event) {
         var max = timePickItems(rail).length - 1, index = timePickSelected(rail), next;
-        if (event.key === 'ArrowLeft') next = index - 1;
-        else if (event.key === 'ArrowRight') next = index + 1;
+        if (event.key === 'ArrowUp') next = index - 1;
+        else if (event.key === 'ArrowDown') next = index + 1;
         else if (event.key === 'Home') next = 0;
         else if (event.key === 'End') next = max;
         else return;
@@ -821,12 +828,18 @@
     return fineSort(parts.precise.concat(parts.unplanned)).filter(function (candidate) { return candidate.id !== item.id; });
   }
 
-  function editorChangeSummary(editor) {
+  // 「還沒儲存」攔截用：只列使用者看得懂的差異，沒有差異就不攔。
+  function editorPendingChanges(editor) {
     var changes = [];
-    if (editor.originalDate !== editor.date) changes.push('日期：' + editor.originalDate + ' → ' + editor.date);
-    if (editor.originalStart !== editor.start || editor.originalEnd !== editor.end) changes.push('時間：' + editor.originalStart + '–' + editor.originalEnd + ' → ' + editor.start + '–' + editor.end);
-    if (editor.coarseVisible && editor.originalCoarseSlot !== editor.coarseSlot) changes.push('粗流時段：' + coarseSlotLabel(editor.originalCoarseSlot) + ' → ' + coarseSlotLabel(editor.coarseSlot));
-    return '<section class="ff-change-summary" aria-label="本次修改摘要"><div class="ff-change-head"><div><span>本次修改</span><b>' + h(changes.length ? changes.join('；') : '日期與時間沒有變更') + '</b></div></div></section>';
+    if (!editor) return changes;
+    if (editor.title !== editor.originalTitle) changes.push('名稱');
+    if (editor.originalDate !== editor.date || editor.originalEndDate !== editor.endDate) changes.push('日期');
+    if (editor.originalStart !== editor.start || editor.originalEnd !== editor.end) changes.push('時間');
+    if (editor.note !== editor.originalNote) changes.push('備註');
+    if (JSON.stringify(editor.todos || []) !== editor.originalTodos) changes.push('待辦');
+    if (editor.coarseVisible !== editor.originalCoarseVisible || editor.coarseSlot !== editor.originalCoarseSlot) changes.push('粗流顯示');
+    if (editor.placeCard && editor.originalMapsUrl != null && (editor.placeCard.mapsUrl || '') !== editor.originalMapsUrl) changes.push('Maps');
+    return changes;
   }
 
   function summaryText(transaction) {
@@ -839,33 +852,13 @@
     return bits.join('、') || '尚無變更';
   }
 
-  var TRAVEL_MODES = [['walk', '步行'], ['drive', '開車／叫車'], ['transit', '大眾運輸'], ['flight', '飛行']];
-
-  // 移動方式不再只屬於交通卡：任何一筆行程都可以標「怎麼過去」。
-  function travelModeField(editor) {
-    return '<label class="ff-field"><span>移動方式</span><select data-ff-travel-mode><option value="">未指定</option>' + TRAVEL_MODES.map(function (entry) {
-      return '<option value="' + entry[0] + '"' + (editor.travelMode === entry[0] ? ' selected' : '') + '>' + entry[1] + '</option>';
-    }).join('') + '</select></label>';
-  }
-
-  function placeEditorFields(item, editor) {
+  // 地點資料在這張卡是唯讀的：要改去地點卡改（Vivian 2026-08-16 定案）。這裡只顯示價格一行。
+  function placePriceRow(editor) {
     var place = editor.placeCard;
-    if (!item.placeId || !place) return '';
-    var categories = typeof categoriesList === 'function' ? categoriesList() : [];
-    var regions = typeof regionsList === 'function' ? regionsList() : [];
-    var per = place.cost && place.cost.per === 'shared' ? 'shared' : 'person';
-    var amount = place.cost && place.cost.amount != null ? place.cost.amount : '';
-    return '<section class="ff-editor-section ff-place-card-fields"><h4>地點資料</h4>' +
-      '<p class="ff-link-note">這是這項行程引用的地點資料；在同一頁修改，不會再開另一套編輯器。若其他行程也引用這個地點，名稱與 Maps 會一起更新。</p>' +
-      '<label class="ff-field"><span>Google Maps 連結</span><input type="url" inputmode="url" data-ff-place-maps value="' + h(place.mapsUrl || '') + '" placeholder="https://maps.google.com/…"></label>' +
-      '<label class="ff-field"><span>地點備註</span><textarea data-ff-place-note maxlength="500" placeholder="例如營業提醒、訂位方式">' + h(place.note || '') + '</textarea></label>' +
-      '<label class="ff-field"><span>營業時間</span><input data-ff-place-hours maxlength="120" value="' + h(place.hours || '') + '" placeholder="例如 11:00–21:00"></label>' +
-      '<div class="ff-rule-grid"><label class="ff-field"><span>區域</span><select data-ff-place-area>' + regions.map(function (region) { return '<option value="' + h(region.key) + '"' + (region.key === place.area ? ' selected' : '') + '>' + h(region.label) + '</option>'; }).join('') + '</select></label>' +
-      '<label class="ff-field"><span>類型</span><select data-ff-place-type>' + categories.map(function (category) { return '<option value="' + h(category.key) + '"' + (category.key === place.type ? ' selected' : '') + '>' + h(category.label) + '</option>'; }).join('') + '</select></label></div>' +
-      '<div class="ff-rule-grid"><label class="ff-field"><span>價格（NT$）</span><input type="number" inputmode="numeric" min="0" data-ff-place-amount value="' + h(amount) + '"></label>' +
-      '<label class="ff-field"><span>計價方式</span><select data-ff-place-per><option value="person"' + (per === 'person' ? ' selected' : '') + '>每人</option><option value="shared"' + (per === 'shared' ? ' selected' : '') + '>共用</option></select></label></div>' +
-      '<label class="ff-field"><span>優先程度</span><select data-ff-place-tier>' + [[0, '未分'], [1, 'T1 一定去'], [2, 'T2 滿想去'], [3, 'T3 順路'], [4, 'T4 可不去']].map(function (entry) { return '<option value="' + entry[0] + '"' + (+place.tier === entry[0] ? ' selected' : '') + '>' + entry[1] + '</option>'; }).join('') + '</select></label>' +
-      '</section>';
+    var amount = place && place.cost && place.cost.amount != null ? +place.cost.amount : null;
+    if (!(amount > 0)) return '';
+    var per = place.cost && place.cost.per === 'shared' ? '共用' : '每人';
+    return '<div class="ff-fact-row"><span>價格</span><b>NT$' + h(String(amount)) + '／' + per + '</b></div>';
   }
 
   // 編輯中就用「正在填的日期時間」判斷，讓提醒跟著輸入即時更新。
@@ -878,55 +871,258 @@
     return CNXCore.hoursWarnings(card, zonedIso(date, editor.start), zonedIso(endDate, editor.end));
   }
 
+  // 行程日期一定落在 TRIP 區間內（清邁這趟 8 天），所以日期選擇用一排日子的 chip，
+  // 不做月曆——月曆在 390px 上要吃掉半個 sheet，而她永遠只會在這幾天之間跳。
+  function tripDateList() {
+    var start = typeof TRIP !== 'undefined' && TRIP && TRIP.startDate || '';
+    var end = typeof TRIP !== 'undefined' && TRIP && TRIP.endDate || '';
+    if (!start || !end) return [];
+    var list = [], cursor = start, guard = 0;
+    while (cursor <= end && guard++ < 60) { list.push(cursor); cursor = addDays(cursor, 1); }
+    return list;
+  }
+
+  function dateChipLabel(dateText) {
+    var meta = dayMeta(dayIdForDate(dateText));
+    return (meta.label || dateText) + (meta.wd ? ' ' + meta.wd : '');
+  }
+
+  // 一列＝「開始／結束　日期格　時間格」。點格子才在同一列下方展開選擇器（iOS 行事曆模式）。
+  function editorTimeRow(editor, which) {
+    var isStart = which === 'start';
+    var dateValue = isStart ? editor.date : editor.endDate;
+    var timeValue = isStart ? editor.start : editor.end;
+    var dateKey = which + '-date', timeKey = which + '-time';
+    var row = '<div class="ff-time-row" data-ff-time-row="' + which + '">' +
+      '<span class="ff-time-key">' + (isStart ? '開始' : '結束') + '</span>' +
+      '<button type="button" class="ff-time-pill' + (editor.openPicker === dateKey ? ' open' : '') + '" data-action="ff-pick" data-pick="' + dateKey + '" aria-expanded="' + (editor.openPicker === dateKey) + '">' + h(dateValue ? dateChipLabel(dateValue) : '選日期') + '</button>' +
+      '<button type="button" class="ff-time-pill' + (editor.openPicker === timeKey ? ' open' : '') + '" data-action="ff-pick" data-pick="' + timeKey + '" aria-expanded="' + (editor.openPicker === timeKey) + '">' + h(timeValue || '選時間') + '</button>' +
+      '</div>';
+    if (editor.openPicker === dateKey) {
+      row += '<div class="ff-pick-open">' + tripDateList().map(function (date) {
+        return '<button type="button" class="ff-date-chip' + (date === dateValue ? ' on' : '') + '" data-action="ff-set-date" data-which="' + which + '" data-date="' + h(date) + '">' + h(dateChipLabel(date)) + '</button>';
+      }).join('') + '</div>';
+    } else if (editor.openPicker === timeKey) {
+      row += '<div class="ff-pick-open">' + renderTimePicker(isStart ? 'data-ff-start' : 'data-ff-end', timeValue || '09:00', isStart ? '開始' : '結束') + '</div>';
+    }
+    return row;
+  }
+
+  // 滾輪開著的時候不整段重畫：openSheet 會抽換 DOM，手指還在滑就會卡住、位置跳掉。
+  // 這裡只把「會變的那幾個字」就地改掉（兩顆時間格、時長、營業提醒、儲存鈕的可按狀態）。
+  function patchEditorLive() {
+    var editor = state.editor, item = findOccurrence(editor.id);
+    if (!item) return;
+    var startPill = sh.querySelector('[data-pick="start-time"]');
+    var endPill = sh.querySelector('[data-pick="end-time"]');
+    var endDatePill = sh.querySelector('[data-pick="end-date"]');
+    if (startPill) startPill.textContent = editor.start || '選時間';
+    if (endPill) endPill.textContent = editor.end || '選時間';
+    if (endDatePill) endDatePill.textContent = editor.endDate ? dateChipLabel(editor.endDate) : '選日期';
+    var span = sh.querySelector('.ff-time-span');
+    if (span) span.textContent = timeSpanNote(editor.durationMin);
+    var warn = sh.querySelector('.ff-hours-warning');
+    var notes = editorHoursWarnings(editor, item);
+    if (warn) {
+      warn.innerHTML = notes.map(function (text) { return '<span>' + h(text) + '</span>'; }).join('');
+      warn.hidden = !notes.length;
+    }
+    var apply = sh.querySelector('[data-action="ff-apply"]');
+    if (apply) apply.disabled = !editor.transaction || !editor.title.trim();
+  }
+
+  // 待辦列＝左滑刪除（沿用 app-4-edit.js 的 initSwipeDelete；紅塊墊在底下，列本身平移）。
+  function todoRowHtml(itemId, todo) {
+    return '<div class="ff-todo-swipe">' +
+      '<button type="button" class="ff-todo-del" data-action="ff-todo-del" data-todo="' + h(todo.id) + '">刪除</button>' +
+      '<button type="button" class="ff-todo-row' + (todo.done ? ' done' : '') + '" data-action="ff-detail-todo" data-eid="' + h(itemId) + '" data-todo="' + h(todo.id) + '" aria-pressed="' + !!todo.done + '">' +
+      '<span class="ff-check" aria-hidden="true">' + (todo.done ? '✓' : '') + '</span>' +
+      '<span class="ff-detail-todo-text">' + h(todo.text) + '</span></button></div>';
+  }
+
   function renderEditor() {
     var editor = state.editor, item = editor && findOccurrence(editor.id);
     if (!editor || !item || typeof sh === 'undefined') return;
     if (editor.pointerCompact) { renderPointerDecision(); return; }
-    var duration = editor.durationMin;
+    if (!editor.confirmDelete && !editor.confirmDiscard && !editor.confirmRipple && !editor.error && !editor.notice &&
+        /-time$/.test(editor.openPicker || '') && sh.querySelector('.ff-timepick')) { patchEditorLive(); return; }
+    if (editor.confirmDelete) { renderDeleteConfirm(); return; }
+    if (editor.confirmDiscard) { renderDiscardConfirm(); return; }
+    if (editor.confirmRipple) { renderRippleConfirm(); return; }
     var transaction = editor.transaction;
-    var candidates = scheduleCandidates(editor);
     var linkedDay = dayIdForDate(editor.date);
     var coarseControls = '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-coarse' + (editor.coarseVisible ? ' checked' : '') + '><span><b>' + (editor.coarseVisible ? '粗流也顯示這項' : '只在細流') + '</b><small>' + (editor.coarseVisible ? '同一筆行程・' + h((dayMeta(linkedDay).label || linkedDay) + '・' + coarseSlotLabel(editor.coarseSlot)) : '適合交通、銜接與不需要出現在大方向的行程') + '</small></span></label>' +
       '<div class="ff-coarse-fields"' + (editor.coarseVisible ? '' : ' hidden') + '><label class="ff-field"><span>粗流時段</span><select data-ff-coarse-slot>' + coarseSlotOptions(editor.coarseSlot) + '</select></label><p class="ff-link-note">日期會跟著上方日期；粗流與細流共用名稱、備註與待辦。</p></div></section>';
-    var titleField = '<label class="ff-field"><span>行程名稱</span><input data-ff-title maxlength="80" value="' + h(editor.title) + '"><small>' + (item.placeId ? '這個名稱來自同頁下方的來源地點資料。' : '粗流與細流共用這個名稱。') + '</small></label>';
-    var minDate = typeof TRIP !== 'undefined' && TRIP && TRIP.startDate || '';
-    var maxDate = typeof TRIP !== 'undefined' && TRIP && TRIP.endDate || '';
-    var editorFields = '<label class="ff-field"><span>日期</span><input type="date" data-ff-date value="' + h(editor.date) + '" min="' + h(minDate) + '" max="' + h(maxDate) + '"></label>' +
-      '<div class="ff-time-fields">' + renderTimePicker('data-ff-start', editor.start, '開始') +
-      '<p class="ff-time-span">' + h(timeSpanNote(duration)) + '</p>' +
-      renderTimePicker('data-ff-end', editor.end, '結束') + '</div>';
+    // 名稱：有地點卡的行程改了會連地點卡一起改（她定的），所以不再標「來自別處」的說明字。
+    var titleField = '<input class="ff-title-input" data-ff-title maxlength="80" placeholder="行程名稱" value="' + h(editor.title) + '">';
+    // 相容層：日期／時間永遠留一個 hidden input，既有委派與測試照舊讀寫，選擇器收合時也在。
+    var hidden = '<input type="hidden" data-ff-date value="' + h(editor.date) + '">' +
+      '<input type="hidden" data-ff-end-date value="' + h(editor.endDate) + '">' +
+      '<input type="hidden" data-ff-start value="' + h(editor.start) + '">' +
+      '<input type="hidden" data-ff-end value="' + h(editor.end) + '">';
+    var timeBlock = '<section class="ff-time-block">' + editorTimeRow(editor, 'start') + editorTimeRow(editor, 'end') +
+      '<p class="ff-time-span">' + h(timeSpanNote(editor.durationMin)) + '</p></section>';
+    // Maps 放第一屏（她 2026-08-16 回饋）：一顆直接開、一顆複製網址（貼給旅伴或丟進捷徑）。
     var maps = mapsForOccurrence(item);
-    var mapSection = '<section class="ff-editor-section"><h4>Maps</h4><div class="ff-detail-maps-list">' + (maps.length ? maps.map(function (link) {
-      return '<a class="ff-detail-maps" href="' + h(link.url) + '" target="_blank" rel="noopener noreferrer"><span>' + h(link.label || '在 Google Maps 開啟') + '</span><span aria-hidden="true">↗</span></a>';
-    }).join('') : '<p class="ff-detail-missing">這項行程沒有 Maps 連結</p>') + '</div></section>';
-    var todos = (item.todos || []).map(function (todo) {
-      return '<button type="button" class="ff-todo-row' + (todo.done ? ' done' : '') + '" data-action="ff-detail-todo" data-eid="' + h(item.id) + '" data-todo="' + h(todo.id) + '" aria-pressed="' + todo.done + '"><span class="ff-check" aria-hidden="true">' + (todo.done ? '✓' : '') + '</span><span class="ff-detail-todo-text">' + h(todo.text) + '</span></button>';
-    }).join('');
-    var noteSection = '<section class="ff-editor-section"><label class="ff-field"><span>本次行程備註</span><textarea data-ff-notes maxlength="500" placeholder="' + h(editor.placeNote ? '卡片備註：' + editor.placeNote : '選填') + '">' + h(editor.notes) + '</textarea></label></section>';
+    var primaryMap = maps[0];
+    var mapRow = '<div class="ff-map-row">' + (primaryMap ?
+      '<a class="ff-map-btn" href="' + h(primaryMap.url) + '" target="_blank" rel="noopener noreferrer">開啟 Maps</a>' +
+      '<button type="button" class="ff-map-btn" data-action="ff-copy-map" data-url="' + h(primaryMap.url) + '">複製連結</button>' :
+      '<span class="ff-detail-missing">這項行程沒有 Maps 連結</span>') +
+      (item.placeId ? '<button type="button" class="ff-map-btn" data-action="ff-open-place" data-pid="' + h(item.placeId) + '">編輯地點卡</button>' : '') +
+      '</div>' + (maps.length > 1 ? '<div class="ff-detail-maps-list">' + maps.map(function (link) {
+        return '<a class="ff-detail-maps" href="' + h(link.url) + '" target="_blank" rel="noopener noreferrer"><span>' + h(link.label || '在 Google Maps 開啟') + '</span><span aria-hidden="true">↗</span></a>';
+      }).join('') + '</div>' : '');   // 只有一個點時，上面那顆「開啟 Maps」就夠了，不再多列一行
+    var mapSection = '<section class="ff-editor-section"><h4>Maps 連結</h4>' +
+      '<label class="ff-field"><span>Google Maps 連結</span><input type="url" inputmode="url" data-ff-place-maps value="' + h(editor.placeCard && editor.placeCard.mapsUrl || '') + '" placeholder="https://maps.google.com/…"' + (editor.placeCard ? '' : ' disabled') + '></label>' +
+      '</section>';
+    // 待辦是草稿：勾選與新增都只改 state，按儲存才寫進資料（她 2026-08-16 定案）。
+    var todos = (editor.todos || []).map(function (todo) { return todoRowHtml(item.id, todo); }).join('');
+    var noteSection = '<section class="ff-editor-section"><label class="ff-field"><span>備註</span><textarea data-ff-notes maxlength="500" placeholder="選填">' + h(editor.note) + '</textarea></label></section>';
     var todoSection = '<section class="ff-editor-section"><h4>待辦事項</h4><div class="ff-detail-todo-list">' + (todos || '<p class="ff-detail-missing">目前沒有待辦</p>') + '</div><div class="ff-todo-add"><input data-ff-detail-todo-text maxlength="120" placeholder="新增待辦"><button type="button" data-action="ff-detail-todo-add" data-eid="' + h(item.id) + '">新增</button></div></section>';
-    // 進階＝平常不用碰的東西（Maps、地點資料、粗流顯示）；一級欄位只留名稱／移動方式／日期／時間／備註／待辦。
-    var advanced = '<details class="ff-rules ff-advanced"' + (editor.advancedOpen ? ' open' : '') + '><summary>進階</summary><div class="ff-rules-body">' +
-      mapSection + placeEditorFields(item, editor) + coarseControls + '</div></details>';
-    var rules = '<details class="ff-rules"' + (editor.rulesOpen ? ' open' : '') + '><summary>更多設定</summary><div class="ff-rules-body">' +
-      '<div class="ff-modes" role="tablist" aria-label="調整方式">' + [['single', '只改這項'], ['ripple', '連動後面'], ['swap', '交換行程']].map(function (mode) {
-        return '<button type="button" role="tab" aria-selected="' + (editor.mode === mode[0]) + '" class="' + (editor.mode === mode[0] ? 'active' : '') + '" data-action="ff-mode" data-mode="' + mode[0] + '"' + (editor.firstSchedule && mode[0] !== 'single' ? ' disabled' : '') + '>' + mode[1] + '</button>';
-      }).join('') + '</div>' + (editor.mode === 'swap' ? '<label class="ff-field"><span>交換對象</span><select data-ff-target><option value="">請選一項</option>' + candidates.map(function (candidate) {
-        var time = candidate.fine ? timeFromIso(candidate.fine.startAt) : '未排';
-        return '<option value="' + h(candidate.id) + '"' + (candidate.id === editor.targetId ? ' selected' : '') + (!candidate.fine ? ' disabled' : '') + '>' + h(time + '｜' + kindLabel(candidate.scheduleKind) + '｜' + occurrenceTitle(candidate) + (candidate.fine && candidate.fine.fixedMarker ? '｜固定' : '')) + '</option>';
-      }).join('') + '</select></label>' : '') +
-      '<label class="ff-fixed-check"><input type="checkbox" data-ff-fixed' + (editor.fixedMarker ? ' checked' : '') + '><span>標記為固定行程</span></label>' +
-      '</div></details>';
+    // 進階＝一年碰不到幾次的東西：Maps 連結、粗流顯示開關與粗流時段。
+    var advanced = '<details class="ff-rules ff-advanced"' + (editor.advancedOpen ? ' open' : '') + '><summary>Maps 連結・粗流顯示</summary><div class="ff-rules-body">' +
+      mapSection + coarseControls + '</div></details>';
+    var deleteRow = '<button type="button" class="ff-delete-row" data-action="ff-delete">刪除這筆行程</button>';
     var notice = editor.notice ? '<div class="ff-preview-state notice" role="status">' + h(editor.notice) + '</div>' : '';
     var hoursNotes = editorHoursWarnings(editor, item);
-    var hoursBlock = hoursNotes.length ?
-      '<section class="ff-hours-warning" role="alert"><b>' + h(editor.title || occurrenceTitle(item)) + '</b>' +
-        hoursNotes.map(function (text) { return '<span>' + h(text) + '</span>'; }).join('') + '</section>' : '';
+    // 永遠 render（沒事就 hidden），滾輪滑動時才能就地改內容而不用整段重畫。
+    var hoursBlock = '<section class="ff-hours-warning" role="alert"' + (hoursNotes.length ? '' : ' hidden') + '>' +
+      hoursNotes.map(function (text) { return '<span>' + h(text) + '</span>'; }).join('') + '</section>';
     var preview = editor.previewing ? '<div class="ff-preview-state" role="status">正在檢查時間…</div>' :
       editor.error ? '<div class="ff-preview-state error" role="alert">' + h(editor.error) + '</div>' : '';
-    var html = '<div class="ff-sheet ff-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-editor-title"><div class="ff-sheet-head"><span class="ff-kicker">編輯' + h(kindLabel(item.scheduleKind)) + '</span><h3 id="ff-editor-title">' + h(editor.title || occurrenceTitle(item)) + '</h3><p>粗流與細流共用這一頁；儲存後兩邊會同步更新。</p></div>' +
-      '<div class="ff-sheet-scroll">' + editorChangeSummary(editor) + hoursBlock + titleField + travelModeField(editor) + editorFields + noteSection + todoSection + advanced + rules + notice + preview + '</div>' +
+    var html = '<div class="ff-sheet ff-editor-sheet" role="dialog" aria-modal="true" aria-label="編輯行程">' +
+      '<button type="button" class="ff-grab" data-action="ff-grab" aria-label="拉高或收起這張卡"></button>' +
+      '<div class="ff-sheet-scroll">' + hidden + titleField + timeBlock + hoursBlock + mapRow + placePriceRow(editor) + noteSection + todoSection + advanced + deleteRow + notice + preview + '</div>' +
       '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || !editor.title.trim() ? ' disabled' : '') + '>儲存</button></div></div>';
     openSheet(html, function () { renderEditor(); }, 'fineflow-editor');
+    applyEditorSheetHeight();
+  }
+
+  // ── 三個確認層：刪除／未存離開／連動後面 ─────────────────────────────
+  function confirmSheet(kicker, title, body, options) {
+    openSheet('<div class="ff-sheet ff-confirm-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-confirm-title">' +
+      '<div class="ff-sheet-head"><span class="ff-kicker">' + h(kicker) + '</span><h3 id="ff-confirm-title">' + h(title) + '</h3><p>' + h(body) + '</p></div>' +
+      '<div class="ff-sheet-scroll"><div class="ff-confirm-actions">' + options.map(function (option) {
+        return '<button type="button" class="' + (option.danger ? 'danger' : (option.primary ? 'primary' : '')) + '" data-action="' + option.action + '">' + h(option.label) + '</button>';
+      }).join('') + '</div></div></div>', null, 'fineflow-confirm');
+  }
+
+  // 結束可以落在隔天（跨午夜），所以時長一律用「開始日期時間 → 結束日期時間」實算。
+  function recomputeEditorDuration() {
+    var editor = state.editor;
+    if (!editor) return;
+    if (editor.endDate < editor.date) editor.endDate = editor.date;
+    if (editor.endDate === editor.date && editor.end <= editor.start) editor.endDate = addDays(editor.date, 1);
+    editor.durationMin = Math.round((Date.parse(zonedIso(editor.endDate, editor.end)) - Date.parse(zonedIso(editor.date, editor.start))) / 60000);
+  }
+
+  // 一點就複製，不要再問一步。區網 http 是 insecure context＝沒有 navigator.clipboard，
+  // 所以留 execCommand('copy') 這條老路（正式站是 https，走上面那條）。
+  function copyText(text) {
+    var ok = function () { if (typeof toast === 'function') toast('已複製 Maps 連結'); };
+    var fallback = function () {
+      try {
+        var area = document.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+        document.body.appendChild(area);
+        area.select();
+        area.setSelectionRange(0, text.length);
+        var copied = document.execCommand && document.execCommand('copy');
+        document.body.removeChild(area);
+        if (copied) ok();
+        else if (typeof toast === 'function') toast('這個瀏覽器不讓自動複製，長按連結複製');
+      } catch (err) { if (typeof toast === 'function') toast('複製失敗'); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback);
+    else fallback();
+  }
+
+  function deleteOccurrence(id) {
+    var item = findOccurrence(id);
+    if (!item) return;
+    var label = occurrenceTitle(item);
+    var guard = currentGuard();
+    state.editor = null;
+    state.selectedId = null;
+    if (uiStore) uiStore.dispatch({ type: 'CANCEL' });
+    if (typeof closeSheet === 'function') closeSheet();
+    applyPlanChange('已刪除「' + label + '」', guard, function (version) {
+      var index = version.plan.findIndex(function (entry) { return entry.id === id; });
+      if (index >= 0) version.plan.splice(index, 1);
+    });
+  }
+
+  // 只看「被改的那一筆」的新區間是否嚴格壓到後面的行程（貼齊不算）；沒壓到就不問。
+  function rippleImpact(editor) {
+    var item = findOccurrence(editor.id);
+    if (!item) return null;
+    if (editor.originalStart === editor.start && editor.originalEnd === editor.end && editor.originalDate === editor.date) return null;
+    var startAt = Date.parse(zonedIso(editor.date, editor.start));
+    var endAt = Date.parse(zonedIso(editor.endDate, editor.end));
+    var hit = scheduleCandidates(editor).filter(function (candidate) {
+      if (!candidate.fine || !candidate.fine.startAt) return false;
+      var otherStart = Date.parse(candidate.fine.startAt);
+      var otherEnd = Date.parse(candidate.fine.endAt || candidate.fine.startAt);
+      return otherStart < endAt && otherEnd > startAt && otherStart >= startAt;
+    });
+    if (!hit.length) return null;
+    var first = hit[0];
+    return { count: hit.length, detail: occurrenceTitle(first) + ' ' + timeFromIso(first.fine.startAt) + ' 開始，跟這筆重疊。' };
+  }
+
+  function renderDeleteConfirm() {
+    var item = findOccurrence(state.editor.id);
+    confirmSheet('刪除', '刪除這筆行程', (item && item.placeId ? occurrenceTitle(item) + ' 這張地點卡會留在庫裡，只有這一次被刪掉。' : '這筆行程會被移除。'), [
+      { label: '刪除', action: 'ff-delete-yes', danger: true },
+      { label: '取消', action: 'ff-delete-no' }
+    ]);
+  }
+
+  // 待辦的刪除確認是「疊在原畫面中間的小視窗」，不走 openSheet——用 sheet 會把整張編輯卡換掉，
+  // 關掉後捲動位置也回到最上面（她 2026-08-16 回饋）。這個小視窗自己掛在 body，原畫面完全不動。
+  function openMiniConfirm(title, body, confirmLabel) {
+    closeMiniConfirm();
+    var host = document.createElement('div');
+    host.className = 'ff-mini-back';
+    host.setAttribute('data-ff-mini', '');
+    host.innerHTML = '<div class="ff-mini" role="dialog" aria-modal="true" aria-labelledby="ff-mini-title">' +
+      '<h3 id="ff-mini-title">' + h(title) + '</h3><p></p>' +
+      '<div class="ff-mini-actions"><button type="button" data-action="ff-todo-del-no">取消</button>' +
+      '<button type="button" class="danger" data-action="ff-todo-del-yes">' + h(confirmLabel) + '</button></div></div>';
+    host.querySelector('p').textContent = body;   // 使用者輸入的字走 textContent，不進 innerHTML
+    document.body.appendChild(host);
+  }
+
+  function closeMiniConfirm() {
+    var existing = document.querySelector('[data-ff-mini]');
+    if (existing) existing.remove();
+  }
+
+  // 取消或刪完都要把那一列滑回原位（initSwipeDelete 觸發後不會自己彈回）。
+  function resetSwipedTodoRow() {
+    Array.prototype.forEach.call(sh.querySelectorAll('.ff-todo-swipe'), function (row) {
+      row.classList.remove('del-armed', 'swiping');
+      var body = row.querySelector('.ff-todo-row');
+      if (body) body.style.transform = '';
+    });
+  }
+
+  function renderDiscardConfirm() {
+    confirmSheet('還沒儲存', '還沒儲存', '改過：' + state.editor.confirmDiscard.join('、'), [
+      { label: '回去繼續改', action: 'ff-discard-no', primary: true },
+      { label: '丟掉這些修改', action: 'ff-discard-yes', danger: true }
+    ]);
+  }
+
+  function renderRippleConfirm() {
+    confirmSheet('時間重疊', '後面 ' + state.editor.confirmRipple.count + ' 筆會被壓到', state.editor.confirmRipple.detail, [
+      { label: '後面一起往後推', action: 'ff-ripple-yes', primary: true },
+      { label: '就這樣存，我自己調', action: 'ff-ripple-no' },
+      { label: '取消', action: 'ff-ripple-cancel' }
+    ]);
   }
 
   function openEditor(id) {
@@ -939,16 +1135,25 @@
     var place = item.placeId && typeof getPlace === 'function' ? getPlace(item.placeId) : null;
     var slotMeta = item.day && item.slot && typeof CNXCore !== 'undefined' && typeof CNXCore.getSlotMeta === 'function' ? CNXCore.getSlotMeta(activeVersion(), item.day, item.slot) : null;
     var sameSlot = item.day && item.slot ? activePlan().filter(function (entry) { return entry.day === item.day && entry.slot === item.slot; }) : [];
+    var end = timeFromIso(item.fine && item.fine.endAt) || addMinutesToTime(start, duration);
+    var date = fineDate(item);
+    // 備註只剩一欄：有地點卡就寫地點卡（沿用舊的 occurrence.notes 當顯示回填，儲存時搬過去）。
+    var note = place ? (place.note || item.notes || '') : (item.notes || '');
     state.editor = {
       id: id, versionId: activeVersion() && activeVersion().id, mode: 'single',
-      title: occurrenceTitle(item), notes: item.notes || '',
+      title: occurrenceTitle(item), originalTitle: occurrenceTitle(item), notes: item.notes || '',
+      note: note, originalNote: note,
       placeNote: place ? place.note || '' : '', placeId: item.placeId || null, originalPlaceId: item.placeId || null, placeCard: place ? copy(place) : null,
-      date: fineDate(item),
-      start: start, end: timeFromIso(item.fine && item.fine.endAt) || addMinutesToTime(start, duration),
-      originalDate: fineDate(item), originalStart: start, originalEnd: timeFromIso(item.fine && item.fine.endAt) || addMinutesToTime(start, duration),
+      originalMapsUrl: place ? place.mapsUrl || '' : null,
+      todos: copy(item.todos || []), originalTodos: JSON.stringify(item.todos || []),
+      date: date, endDate: end <= start ? addDays(date, 1) : date,
+      start: start, end: end,
+      originalDate: date, originalEndDate: end <= start ? addDays(date, 1) : date, originalStart: start, originalEnd: end,
+      openPicker: '', sheetH: 0,
+      confirmDelete: false, confirmTodoDelete: null, confirmDiscard: null, confirmRipple: null,
       durationMin: duration, firstSchedule: !item.fine,
       fixedMarker: !!(item.fine && item.fine.fixedMarker),
-      coarseVisible: !!(item.day && item.slot), coarseDay: item.day || dayIdForDate(fineDate(item)),
+      coarseVisible: !!(item.day && item.slot), originalCoarseVisible: !!(item.day && item.slot), coarseDay: item.day || dayIdForDate(fineDate(item)),
       coarseSlot: item.slot || slotFromTime(start),
       originalCoarseSlot: item.slot || slotFromTime(start),
       coarseOrder: Math.max(0, sameSlot.findIndex(function (entry) { return entry.id === item.id; })),
@@ -1010,6 +1215,11 @@
       renderEditor();
       return;
     }
+    // 「連動後面」不佔版面：只有動到時間、而且真的壓到後面的行程，儲存時才問一句。
+    if (!editor.pointerCompact && !editor.rippleDecided) {
+      var impact = rippleImpact(editor);
+      if (impact) { editor.confirmRipple = impact; renderEditor(); return; }
+    }
     if (version.id !== editor.versionId || (transaction.versionId && transaction.versionId !== version.id)) {
       editor.transaction = null;
       editor.error = '目前版本已切換，這份預演不會套用。請在新版本重新開啟行程。';
@@ -1062,8 +1272,23 @@
       var editedItem = next.plan.find(function (item) { return item.id === editor.id; });
       if (editedItem) {
         if (editedItem.custom) editedItem.custom.title = editor.title.trim();
-        editedItem.notes = editor.notes || '';
-        editedItem.travelMode = editor.travelMode || '';
+        // 一欄備註：有地點卡就存地點卡，並把舊的單次備註搬空（避免同一段字在兩處各存一份）。
+        if (editor.placeId && editor.placeCard) { editor.placeCard.note = editor.note || ''; editedItem.notes = ''; }
+        else editedItem.notes = editor.note || '';
+        // 待辦按 id 併回去，不整組覆蓋：編輯期間別人同步進來的待辦不能被打開浮層那一刻的快照洗掉。
+        // 刪除只認「打開時就在、現在草稿裡沒有」的那些；同步進來的新待辦一律留著。
+        var draftById = {};
+        (editor.todos || []).forEach(function (todo) { draftById[todo.id] = todo; });
+        var wasThere = {};
+        try { JSON.parse(editor.originalTodos || '[]').forEach(function (todo) { wasThere[todo.id] = true; }); } catch (err) { /* 舊資料壞掉就當沒有 */ }
+        var knownIds = {};
+        editedItem.todos = (editedItem.todos || []).filter(function (todo) {
+          if (wasThere[todo.id] && !draftById[todo.id]) return false;   // 在編輯卡裡被刪掉
+          knownIds[todo.id] = true;
+          if (draftById[todo.id]) todo.done = !!draftById[todo.id].done;
+          return true;
+        });
+        (editor.todos || []).forEach(function (todo) { if (!knownIds[todo.id]) editedItem.todos.push(copy(todo)); });
         applyCoarseEditorFields(next, editor, editedItem);
       }
       var inverse = typeof api.invertTransaction === 'function' && !transaction.manualFirstSchedule ? api.invertTransaction(transaction, next) : null;
@@ -1254,9 +1479,11 @@
     var maxDate = typeof TRIP !== 'undefined' && TRIP && TRIP.endDate || '';
     var span = (minuteValue(end) - minuteValue(start) + 1440) % 1440;
     return '<label class="ff-field"><span>日期</span><input type="date" data-ff-create-date value="' + h(date) + '" min="' + h(minDate) + '" max="' + h(maxDate) + '"></label>' +
-      '<div class="ff-time-fields">' + renderTimePicker('data-ff-create-start', start, '開始') +
+      '<input type="hidden" data-ff-create-start value="' + h(start) + '">' +
+      '<input type="hidden" data-ff-create-end value="' + h(end) + '">' +
+      '<div class="ff-time-fields"><div class="ff-timepick-label">開始</div>' + renderTimePicker('data-ff-create-start', start, '開始') +
       '<p class="ff-time-span">' + h(timeSpanNote(span)) + '</p>' +
-      renderTimePicker('data-ff-create-end', end, '結束') + '</div>';
+      '<div class="ff-timepick-label">結束</div>' + renderTimePicker('data-ff-create-end', end, '結束') + '</div>';
   }
 
   function creationCoarseFields(draft) {
@@ -1594,6 +1821,64 @@
       return;
     }
     if (action === 'ff-card-todo') { event.stopPropagation(); toggleOccurrenceTodo(target.dataset.eid, target.dataset.todo, false); return; }
+    // 編輯卡裡的待辦是草稿（按儲存才算）；行事曆卡片上的待辦仍是即時勾選。
+    if (action === 'ff-detail-todo' && state.editor) {
+      var draftTodo = (state.editor.todos || []).find(function (entry) { return entry.id === target.dataset.todo; });
+      if (draftTodo) {
+        draftTodo.done = !draftTodo.done;
+        target.classList.toggle('done', draftTodo.done);   // 就地切，不重畫（重畫＝畫面跳一下）
+        target.setAttribute('aria-pressed', String(draftTodo.done));
+        target.querySelector('.ff-check').textContent = draftTodo.done ? '✓' : '';
+      }
+      return;
+    }
+    if (action === 'ff-detail-todo-add' && state.editor) {
+      var todoInput = sh.querySelector('[data-ff-detail-todo-text]');
+      var todoText = todoInput && todoInput.value.trim();
+      if (!todoText) { if (todoInput) todoInput.focus(); return; }
+      var added = { id: typeof uid === 'function' ? uid() : 'todo_' + Date.now(), text: todoText, done: false };
+      state.editor.todos = (state.editor.todos || []).concat([added]);
+      // 就地補一列，不整段重畫——重畫會讓整個畫面跳一下（她 2026-08-16 回饋）。
+      var list = sh.querySelector('.ff-detail-todo-list');
+      if (list) {
+        var missing = list.querySelector('.ff-detail-missing');
+        if (missing) missing.remove();
+        list.insertAdjacentHTML('beforeend', todoRowHtml(state.editor.id, added));
+        todoInput.value = '';
+      } else renderEditor();
+      return;
+    }
+    // 待辦刪除：左滑（或直接按紅塊）先問一次，確認了才從草稿拿掉；按儲存才寫進資料。
+    if (action === 'ff-todo-del' && state.editor) {
+      var doomed = (state.editor.todos || []).find(function (entry) { return entry.id === target.dataset.todo; });
+      if (!doomed) return;
+      state.editor.confirmTodoDelete = { id: doomed.id, text: doomed.text };
+      // endSwipe 在觸發 click 前就把 del-armed 拿掉了；確認視窗開著時要把紅底留住，
+      // 不然那一列會變成「白條往左飄、後面什麼都沒有」。
+      var armedRow = target.closest('.ff-todo-swipe');
+      if (armedRow) armedRow.classList.add('del-armed');
+      openMiniConfirm('刪除這個待辦？', doomed.text, '刪除');
+      return;
+    }
+    if (action === 'ff-todo-del-no' && state.editor) {
+      state.editor.confirmTodoDelete = null;
+      closeMiniConfirm();
+      resetSwipedTodoRow();
+      return;
+    }
+    if (action === 'ff-todo-del-yes' && state.editor) {
+      var doomedId = state.editor.confirmTodoDelete && state.editor.confirmTodoDelete.id;
+      state.editor.todos = (state.editor.todos || []).filter(function (entry) { return entry.id !== doomedId; });
+      state.editor.confirmTodoDelete = null;
+      closeMiniConfirm();
+      // 就地移除那一列＝捲動位置不動（她要求刪完停在原畫面）
+      var gone = sh.querySelector('.ff-todo-swipe [data-todo="' + doomedId + '"]');
+      var goneWrap = gone && gone.closest('.ff-todo-swipe');
+      var listHost = goneWrap && goneWrap.parentElement;
+      if (goneWrap) goneWrap.remove();
+      if (listHost && !listHost.querySelector('.ff-todo-swipe')) listHost.insertAdjacentHTML('beforeend', '<p class="ff-detail-missing">目前沒有待辦</p>');
+      return;
+    }
     if (action === 'ff-detail-todo') { toggleOccurrenceTodo(target.dataset.eid, target.dataset.todo, true); return; }
     if (action === 'ff-detail-todo-add') { addOccurrenceTodo(target.dataset.eid); return; }
     if (action === 'ff-detail-edit') { openEditor(target.dataset.eid); return; }
@@ -1714,12 +1999,62 @@
       openTodos(todoDay && state.day === todoDay ? todoDay : null);
       return;
     }
-    if (action === 'ff-mode' && state.editor) {
-      if (state.editor.firstSchedule && target.dataset.mode !== 'single') return;
-      state.editor.mode = target.dataset.mode;
-      state.editor.transaction = null;
+    // ── 新版編輯卡：時間格展開／日期 chip／拉高／刪除／未存離開／連動 ──
+    // 展開時間／日期不改 sheet 高度（她明說「一按就跳全高」很怪）；改成把那一列捲進視線內。
+    if (action === 'ff-pick' && state.editor) {
+      state.editor.openPicker = state.editor.openPicker === target.dataset.pick ? '' : target.dataset.pick;
       renderEditor();
+      var opened = sh.querySelector('.ff-pick-open');
+      if (opened && opened.scrollIntoView) opened.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (action === 'ff-copy-map') {
+      var url = target.dataset.url || '';
+      copyText(url);
+      return;
+    }
+    if (action === 'ff-open-place' && typeof openEdit === 'function') { openEdit(target.dataset.pid); return; }
+    if (action === 'ff-set-date' && state.editor) {
+      var pickedDate = target.dataset.date;
+      if (target.dataset.which === 'start') {
+        var dayShift = state.editor.endDate === state.editor.date ? 0 : 1;
+        state.editor.date = pickedDate;
+        state.editor.endDate = dayShift ? addDays(pickedDate, 1) : pickedDate;
+      } else state.editor.endDate = pickedDate;
+      state.editor.openPicker = '';
+      var dateInput = sh.querySelector('[data-ff-date]');
+      if (dateInput && target.dataset.which === 'start') { dateInput.value = pickedDate; dateInput.dispatchEvent(new Event('input', { bubbles: true })); }
+      else { recomputeEditorDuration(); renderEditor(); clearTimeout(previewTimer); previewTimer = setTimeout(runPreview, 100); }
+      return;
+    }
+    // 把手單點＝在半高與全高之間切一次；拖曳走上面的 pointer 流程（自由高度）。
+    if (action === 'ff-grab' && state.editor) {
+      var bounds = editorSheetBounds();
+      state.editor.sheetH = state.editor.sheetH > bounds.min + 20 ? bounds.min : bounds.max;
+      applyEditorSheetHeight();
+      return;
+    }
+    if (action === 'ff-delete' && state.editor) { state.editor.confirmDelete = true; renderEditor(); return; }
+    if (action === 'ff-delete-no' && state.editor) { state.editor.confirmDelete = false; renderEditor(); return; }
+    if (action === 'ff-delete-yes' && state.editor) { deleteOccurrence(state.editor.id); return; }
+    if (action === 'ff-discard-no' && state.editor) { state.editor.confirmDiscard = null; renderEditor(); return; }
+    if (action === 'ff-discard-yes' && state.editor) {
+      state.editor = null;
+      state.selectedId = null;
+      if (uiStore) uiStore.dispatch({ type: 'CANCEL' });
+      if (typeof closeSheet === 'function') closeSheet();
+      renderFineFlow();
+      return;
+    }
+    if (action === 'ff-ripple-cancel' && state.editor) { state.editor.confirmRipple = null; renderEditor(); return; }
+    if (action === 'ff-ripple-no' && state.editor) { state.editor.confirmRipple = null; state.editor.rippleDecided = 'single'; applyEditorTransaction(); return; }
+    if (action === 'ff-ripple-yes' && state.editor) {
+      state.editor.confirmRipple = null;
+      state.editor.rippleDecided = 'ripple';
+      state.editor.mode = 'ripple';
+      state.editor.transaction = null;
       runPreview();
+      applyEditorTransaction();
       return;
     }
     if (action === 'ff-apply') { applyEditorTransaction(); return; }
@@ -2421,6 +2756,71 @@
     }
   });
 
+  // 把手拖曳＝自由高度，手指到哪就到哪（她要的不是兩段跳）。下限是半高，上限 92dvh。
+  var grabDrag = null;
+
+  function editorSheetBounds() {
+    var viewport = (typeof window !== 'undefined' && window.innerHeight) || 800;
+    return { min: Math.round(viewport * 0.5), max: Math.round(viewport * 0.92) };
+  }
+
+  function applyEditorSheetHeight() {
+    if (typeof sh === 'undefined' || !sh || !state.editor) return;
+    var bounds = editorSheetBounds();
+    if (!state.editor.sheetH) { sh.style.removeProperty('max-height'); return; }
+    sh.style.maxHeight = clamp(state.editor.sheetH, bounds.min, bounds.max) + 'px';
+  }
+
+  document.addEventListener('pointerdown', function (event) {
+    var grab = event.target && event.target.closest && event.target.closest('.ff-grab');
+    if (!grab || !state.editor) return;
+    grabDrag = { y: event.clientY, base: sh.getBoundingClientRect().height, moved: false };
+    if (grab.setPointerCapture && event.pointerId != null) { try { grab.setPointerCapture(event.pointerId); } catch (err) { /* 舊瀏覽器沒有就算了 */ } }
+  }, true);
+
+  document.addEventListener('pointermove', function (event) {
+    if (!grabDrag || !state.editor) return;
+    var delta = grabDrag.y - event.clientY;   // 往上拖＝變高
+    if (!grabDrag.moved && Math.abs(delta) < 4) return;
+    grabDrag.moved = true;
+    event.preventDefault();
+    var bounds = editorSheetBounds();
+    state.editor.sheetH = clamp(Math.round(grabDrag.base + delta), bounds.min, bounds.max);
+    sh.style.maxHeight = state.editor.sheetH + 'px';
+  }, true);
+
+  document.addEventListener('pointerup', function () { grabDrag = null; }, true);
+  document.addEventListener('pointercancel', function () { grabDrag = null; }, true);
+
+  // 小視窗：點背板或按 Esc＝取消
+  document.addEventListener('click', function (event) {
+    if (event.target && event.target.matches && event.target.matches('[data-ff-mini]')) {
+      if (state.editor) state.editor.confirmTodoDelete = null;
+      closeMiniConfirm();
+      resetSwipedTodoRow();
+    }
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape' || !document.querySelector('[data-ff-mini]')) return;
+    event.stopPropagation();
+    if (state.editor) state.editor.confirmTodoDelete = null;
+    closeMiniConfirm();
+    resetSwipedTodoRow();
+  }, true);
+
+  // 未存就想離開（✕／取消／點背景）＝先問。沒改過任何東西就直接放行，不囉嗦。
+  document.addEventListener('click', function (event) {
+    if (!state.editor || state.editor.confirmDiscard || state.editor.confirmDelete || state.editor.confirmTodoDelete || state.editor.confirmRipple || state.editor.pointerCompact) return;
+    var closer = event.target && event.target.closest && event.target.closest('[data-action="close"]');
+    if (!closer || !closer.closest('.ff-editor-sheet')) return;
+    var changes = editorPendingChanges(state.editor);
+    if (!changes.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.editor.confirmDiscard = changes;
+    renderEditor();
+  }, true);
+
   document.addEventListener('input', function (event) {
     if (state.createDraft && event.target.matches('[data-ff-create-date], [data-ff-create-start], [data-ff-create-end], [data-ff-create-title]')) {
       if (event.target.matches('[data-ff-create-date]')) {
@@ -2440,25 +2840,16 @@
       if (state.editor.placeCard) state.editor.placeCard.name = event.target.value;
       return;
     } else if (event.target.matches('[data-ff-notes]')) {
-      state.editor.notes = event.target.value;
+      state.editor.note = event.target.value;
       return;
     } else if (event.target.matches('[data-ff-place-maps]')) {
       if (state.editor.placeCard) state.editor.placeCard.mapsUrl = event.target.value;
       return;
-    } else if (event.target.matches('[data-ff-place-note]')) {
-      if (state.editor.placeCard) state.editor.placeCard.note = event.target.value;
-      return;
-    } else if (event.target.matches('[data-ff-place-hours]')) {
-      if (state.editor.placeCard) state.editor.placeCard.hours = event.target.value;
-      return;
-    } else if (event.target.matches('[data-ff-place-amount]')) {
-      if (state.editor.placeCard) {
-        state.editor.placeCard.cost = state.editor.placeCard.cost || { per: 'person' };
-        state.editor.placeCard.cost.amount = event.target.value === '' ? null : Math.max(0, +event.target.value || 0);
-      }
-      return;
     } else if (event.target.matches('[data-ff-date]')) {
+      var previousDate = state.editor.date;
       state.editor.date = event.target.value;
+      // 結束日期跟著整段平移（原本同日就同日，原本跨午夜就繼續跨）。
+      state.editor.endDate = state.editor.endDate === previousDate ? event.target.value : addDays(event.target.value, 1);
       if (state.editor.coarseVisible) {
         state.editor.coarseDay = dayIdForDate(state.editor.date);
         state.editor.coarseSlot = slotFromTime(state.editor.start);
@@ -2466,14 +2857,14 @@
     } else if (event.target.matches('[data-ff-start]')) {
       state.editor.start = event.target.value;
       state.editor.end = addMinutesToTime(state.editor.start, state.editor.durationMin);
+      state.editor.endDate = state.editor.end <= state.editor.start ? addDays(state.editor.date, 1) : state.editor.date;
       if (state.editor.coarseVisible) state.editor.coarseSlot = slotFromTime(state.editor.start);
       var endInput = sh.querySelector('[data-ff-end]');
       if (endInput) endInput.value = state.editor.end;
       syncTimePicker(sh.querySelector('.ff-timepick[data-ff-timepick="data-ff-end"]'), state.editor.end);   // 結束時間跟著平移，軌道也要跟上（只改視覺、不再 dispatch）
     } else if (event.target.matches('[data-ff-end]')) {
       state.editor.end = event.target.value;
-      var date = state.editor.date, endDate = state.editor.end <= state.editor.start ? addDays(date, 1) : date;
-      state.editor.durationMin = Math.round((Date.parse(zonedIso(endDate, state.editor.end)) - Date.parse(zonedIso(date, state.editor.start))) / 60000);
+      recomputeEditorDuration();
     }
     else return;
     state.editor.notice = '';
@@ -2492,9 +2883,7 @@
       return;
     }
     if (!state.editor) return;
-    if (event.target.matches('[data-ff-target]')) state.editor.targetId = event.target.value;
-    else if (event.target.matches('[data-ff-fixed]')) { state.editor.fixedMarker = event.target.checked; state.editor.rulesOpen = true; }
-    else if (event.target.matches('[data-ff-coarse]')) {
+    if (event.target.matches('[data-ff-coarse]')) {
       state.editor.coarseVisible = event.target.checked;
       if (state.editor.coarseVisible) state.editor.coarseDay = dayIdForDate(state.editor.date);
       renderEditor();
@@ -2502,17 +2891,6 @@
     }
     else if (event.target.matches('[data-ff-coarse-day]')) { state.editor.coarseDay = event.target.value; renderEditor(); return; }
     else if (event.target.matches('[data-ff-coarse-slot]')) { state.editor.coarseSlot = event.target.value; renderEditor(); return; }
-    else if (event.target.matches('[data-ff-travel-mode]')) { state.editor.travelMode = event.target.value || ''; return; }
-    else if (event.target.matches('[data-ff-place-area]')) { if (state.editor.placeCard) state.editor.placeCard.area = event.target.value; return; }
-    else if (event.target.matches('[data-ff-place-type]')) { if (state.editor.placeCard) state.editor.placeCard.type = event.target.value; return; }
-    else if (event.target.matches('[data-ff-place-per]')) {
-      if (state.editor.placeCard) {
-        state.editor.placeCard.cost = state.editor.placeCard.cost || {};
-        state.editor.placeCard.cost.per = event.target.value === 'shared' ? 'shared' : 'person';
-      }
-      return;
-    }
-    else if (event.target.matches('[data-ff-place-tier]')) { if (state.editor.placeCard) state.editor.placeCard.tier = +event.target.value || 0; return; }
     else return;
     state.editor.notice = '';
     runPreview();
