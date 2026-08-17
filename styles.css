@@ -174,7 +174,7 @@
     .ov-line{font-size:14px;}
   }
   @media(min-width:1100px){
-    body{display:grid;grid-template-columns:var(--mapW) minmax(0,1fr) var(--libW);grid-template-rows:46px calc(100dvh - 46px);height:100dvh;overflow:hidden;--mapW:clamp(320px,28vw,430px);--libW:350px;}   /* 地圖再窄一點點、釋出空間給總覽（Vivian 🤏） */   /* 地圖寬＝日卡/表格兩模式一致(--mapW≈原矩陣寬)；庫窄一點(--libW)釋出空間給總覽；總覽中欄 minmax(0,1fr) */
+    body{display:grid;grid-template-columns:var(--mapW) minmax(0,1fr) var(--libW);grid-template-rows:46px calc(100dvh - 46px);height:100dvh;overflow:hidden;--mapW:clamp(320px,28vw,430px);--libW:clamp(260px,24vw,350px);}   /* 庫欄改成會縮：原本固定 350px，視窗縮到 1280 時把行事曆擠掉 115px、標題被截斷的卡從 9 張變 18 張 */   /* 地圖再窄一點點、釋出空間給總覽（Vivian 🤏） */   /* 地圖寬＝日卡/表格兩模式一致(--mapW≈原矩陣寬)；庫窄一點(--libW)釋出空間給總覽；總覽中欄 minmax(0,1fr) */
     body:has(#mapdrawer.collapsed){grid-template-columns:46px minmax(0,1fr) var(--libW);}
     .lib-search .add.libcol{display:inline-flex;background:var(--line);border-color:#cbbfa8;color:#5a5145;font-weight:700;}   /* 收庫鈕＝軌色醒目、別淹沒在白按鈕裡（共同#1：庫展開收得起來）*/
     body.libcollapsed{grid-template-columns:var(--mapW) minmax(0,1fr);}   /* 庫收合＝2 欄、不佔右側 46px（展開鈕挪到 header 的 📕，Vivian）→ 總覽更寬 */
@@ -1219,9 +1219,7 @@
     position:absolute;
     inset:0;
     z-index:1;
-    display:flex;
-    flex-direction:column;
-    align-items:stretch;
+    display:block;   /* 不可以是 flex：flex 子元素會被 blockify，標題的 -webkit-box + line-clamp 直接失效＝截斷沒有「…」 */
     min-width:0;
     width:100%;
     min-height:100%;
@@ -1237,10 +1235,10 @@
     text-align:left;
     cursor:pointer;
   }
-  .ff-cal-card-title{display:-webkit-box;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:10px;line-height:1.13;font-weight:750;overflow-wrap:anywhere;}
+  .ff-cal-card-title{display:-webkit-box;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:11px;line-height:1.2;font-weight:750;overflow-wrap:anywhere;}
   .ff-cal-type-icon{margin-right:3px;font-size:.9em;font-weight:500;}
-  .ff-cal-card-time{flex:none;margin-top:2px;font-size:8px;line-height:1.15;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.78;}
-  .ff-cal-card-note{display:-webkit-box;min-width:0;min-height:0;margin-top:3px;overflow:hidden;font-size:11px;line-height:1.3;font-weight:560;white-space:normal;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:3;opacity:.92;}
+  .ff-cal-card-time{margin-top:1px;font-size:9px;line-height:1.2;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.78;}
+  .ff-cal-card-note{display:-webkit-box;min-width:0;min-height:0;margin-top:3px;overflow:hidden;font-size:9px;line-height:1.35;font-weight:560;white-space:normal;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:3;opacity:.92;}
   .ff-cal-card-map-link{position:absolute;right:4px;bottom:4px;z-index:3;min-width:24px;min-height:24px;display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:7px;background:rgba(255,255,255,.9);color:inherit;font-size:12px;line-height:1;text-decoration:none;box-shadow:0 1px 4px rgba(20,20,35,.12);}
   .ff-cal-card-map-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
   .ff-cal-card-flags{position:absolute;right:3px;top:3px;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;font-size:8px;line-height:1;white-space:nowrap;}
@@ -1259,25 +1257,36 @@
     background:transparent;
     color:inherit;
     font-family:inherit;
-    font-size:8.5px;
+    font-size:9px;
     font-weight:650;
     text-align:left;
     pointer-events:none;
   }
   .ff-cal-card-todo-summary>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .ff-cal-check{width:13px;height:13px;border:1px solid currentColor;border-radius:4px;background:rgba(255,255,255,.55);opacity:.9;}
-  .ff-cal-card.density-small .ff-cal-card-main{justify-content:flex-start;padding:2px 4px 1px;}
+  /* 矮卡（≤30 分）只留店名，時間靠它在時間軸上的位置讀（Google Calendar 也是這樣）。
+     試過把時間擠進同一行，量出來 95px 的卡剩 60px 給店名＝「前往週六夜市」被切成「前往週六…」，不划算。 */
+  .ff-cal-card.density-small .ff-cal-card-main{display:block;padding:2px 4px 1px;}
   .ff-cal-card.density-small .ff-cal-card-time{display:none;}
   .ff-cal-card.density-small .ff-cal-card-note{display:none;}
   .ff-cal-card.density-small .ff-cal-card-map-link{display:none;}
-  .ff-cal-card.density-small .ff-cal-card-title{display:block;height:14px;margin:0;overflow:hidden;font-size:9px;line-height:14px;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal;}
+  .ff-cal-card.density-small .ff-cal-card-title{min-width:0;display:block;margin:0;overflow:hidden;font-size:11px;line-height:1.2;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal;}
   .ff-cal-card.density-small .ff-cal-card-flags{position:absolute;right:2px;top:2px;margin:0;}
   .ff-cal-card.density-small .ff-cal-card-flags>*{display:none;}
-  .ff-cal-card.density-medium .ff-cal-card-title{-webkit-line-clamp:1;}
+  .ff-cal-card.density-medium .ff-cal-card-title{-webkit-line-clamp:2;}   /* 48px 的卡放得下兩行標題＋時間，只給一行是白白留 24px 空著、店名還被切 */
   .ff-cal-card.density-medium .ff-cal-card-note{-webkit-line-clamp:2;}
   .ff-cal-card.density-medium .ff-cal-card-todo-summary{display:none;}
   .ff-cal-card.density-large .ff-cal-card-note{-webkit-line-clamp:3;}
   .ff-cal-card.density-large .ff-cal-card-flags{flex-wrap:wrap;overflow:visible;}
+  /* 有並排（同時段兩張以上）＝寬度被砍半，塞三種資訊只會三種都被切。只留店名，時間靠時間軸位置讀。 */
+  .ff-cal-card.is-crowded .ff-cal-card-time,
+  .ff-cal-card.is-crowded .ff-cal-card-note,
+  .ff-cal-card.is-crowded .ff-cal-card-todo-summary,
+  .ff-cal-card.is-crowded .ff-cal-card-map-link{display:none;}
+  .ff-cal-card.is-crowded .ff-cal-card-title{-webkit-line-clamp:4;}
+  /* 並排的矮卡只有 47px 寬：不能沿用 density-small 的 nowrap，否則「換匯」直接變成「✈️…」。 */
+  .ff-cal-card.is-crowded.density-small .ff-cal-card-main{display:block;}
+  .ff-cal-card.is-crowded.density-small .ff-cal-card-title{white-space:normal;overflow-wrap:anywhere;}
   .ff-cal-card.is-fixed .ff-cal-card-main{padding-right:5px;}
   .ff-cal-card.is-hours-warning{outline:2px solid #c84a4a;outline-offset:-1px;box-shadow:0 2px 6px rgba(181,69,69,.18);}
   .ff-cal-card-hours{display:block;color:var(--danger);font-size:10px;font-weight:800;line-height:1.25;overflow-wrap:anywhere;}
@@ -1350,6 +1359,11 @@
   .ff-cal-resize::after{content:"";position:absolute;left:12px;right:12px;top:8px;height:3px;border-radius:2px;background:var(--ink);box-shadow:0 0 0 1px rgba(255,255,255,.8);}
   .ff-cal-resize-start{top:-9px;}
   .ff-cal-resize-end{bottom:-9px;}
+  /* 矮卡：18px 把手上下各吃掉 9px，24px 高的卡只剩 6px 能點開編輯。縮成 10px＝留 14px 安全區。 */
+  .ff-cal-card.density-small .ff-cal-resize{height:10px;}
+  .ff-cal-card.density-small .ff-cal-resize::after{top:4px;}
+  .ff-cal-card.density-small .ff-cal-resize-start{top:-5px;}
+  .ff-cal-card.density-small .ff-cal-resize-end{bottom:-5px;}
   .ff-cal-card:hover .ff-cal-resize,
   .ff-cal-card:focus-within .ff-cal-resize,
   .ff-cal-card.is-selected .ff-cal-resize,
@@ -1489,8 +1503,8 @@
     .ff-calendar{--ff-cal-gutter:63px;}
     .ff-cal-toolbar strong{font-size:11px;}
     .ff-cal-date b{font-size:12px;}
-    .ff-cal-card-title{font-size:9px;}
-    .ff-cal-card-time{font-size:7px;}
+    .ff-cal-card-title{font-size:11px;}
+    .ff-cal-card-time{font-size:9px;}
     .ff-cal-fab{right:14px;bottom:14px;}
     .sheet:has(.ff-sheet){max-height:min(78dvh,660px);}
     .ff-sheet{max-height:min(78dvh,660px);}
@@ -1507,7 +1521,7 @@
     .ff-cal-toolbar>.ff-cal-range{padding-left:0;text-align:center;}
     .ff-cal-time{padding-right:8px;font-size:9px;}
     .ff-cal-card-main{padding:4px 5px 3px 6px;}
-    .ff-cal-card-time{font-size:8.5px;}
+    .ff-cal-card-time{font-size:9px;}
     .ff-cal-card-title{font-size:11px;}
     .ff-cal-card-flags,.ff-cal-progress,.ff-cal-meta-icon{font-size:9px;}
     .ff-cal-card-todo-summary{font-size:9.5px;}

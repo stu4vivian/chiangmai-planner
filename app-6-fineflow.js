@@ -623,6 +623,7 @@
       '<button type="button" class="ff-cal-drag-handle" data-action="ff-drag-card" data-eid="' + h(card.id) + '" aria-label="拖動調整時間"></button>' + resizeHandles :
       (armed ? resizeHandles : '');
     var classes = ['ff-cal-card', 'density-' + card.density];
+    if (card.laneCount > 1) classes.push('is-crowded');   // 並排＝寬度砍半，CSS 只留店名（時間靠時間軸位置讀）
     if (warningText) classes.push('is-hours-warning');
     if (card.fixed) classes.push('is-fixed');
     if (selected) classes.push('is-selected');
@@ -634,7 +635,7 @@
         '<strong class="ff-cal-card-title"><span class="ff-cal-type-icon" aria-hidden="true">' + h(card.categoryIcon || '📍') + '</span>' + h(card.title) + '</strong>' +
         '<span class="ff-cal-card-time">' + h(card.startLabel + '–' + card.endLabel) + '</span>' +
         (warningText ? '<span class="ff-cal-card-hours">' + h(warningText) + '</span>' : '') + note + todo +
-        '<span class="ff-cal-card-flags">' + (card.fixed ? '<span title="固定">鎖</span>' : '') + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
+        '<span class="ff-cal-card-flags">' + (card.fixed ? '<span title="固定">📌</span>' : '') + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
       '</div>' +
       (map ? '<a class="ff-cal-card-map-link" href="' + h(map) + '" target="_blank" rel="noopener noreferrer" aria-label="在 Google Maps 開啟' + h(card.title) + '">Maps ↗</a>' : '') +
       cardControls +
@@ -683,6 +684,16 @@
     '</div>';
   }
 
+  // 進頁捲到「畫面上第一張卡的前 30 分」。原本寫死 8.5 小時＝08:30，比 07:30 出門的日子還晚，第一筆看不到。
+  function calendarFirstCardScrollTop(scroll) {
+    var pixelsPerHour = calendarPixelsPerHour();
+    // 讀 inline 的 top（render 時就寫死了），不用 offsetTop——這支常在版面還沒排出來時跑，offsetTop 會全是 0。
+    var tops = [].map.call(scroll.querySelectorAll('.ff-cal-card'), function (card) { return parseFloat(card.style.top) || 0; })
+      .filter(function (top) { return top > 0; });
+    if (!tops.length) return 8.5 * pixelsPerHour;
+    return Math.max(0, Math.min.apply(null, tops) - pixelsPerHour / 2);
+  }
+
   function renderFineFlow() {
     var root = document.getElementById(rootId);
     if (!root) return;
@@ -701,16 +712,20 @@
     try {
       root.innerHTML = renderCalendarPage(buildCalendarModel());
       var nextScroll = root.querySelector('.ff-cal-scroll');
-      if (nextScroll && priorScrollTop != null) nextScroll.scrollTop = priorScrollTop;
-      else if (nextScroll && !state.calendarInitialScroll) {
-        state.calendarInitialScroll = true;
-        var initialScrollTop = 8.5 * calendarPixelsPerHour();
+      // 順序不能反過來：細流常在分頁還藏著的時候先 render 一次，那次寫 scrollTop 不會生效（元素沒排版）。
+      // 舊碼在那一次就把 calendarInitialScroll 記成 done，等她真的切過來時只還原到 0＝永遠從半夜開始。
+      if (nextScroll && !state.calendarInitialScroll) {
+        var initialScrollTop = calendarFirstCardScrollTop(nextScroll);
         nextScroll.scrollTop = initialScrollTop;
+        state.calendarInitialScroll = nextScroll.scrollTop > 0;   // 真的捲到了才算數，否則下次 render 再試
         setTimeout(function () {
           var currentScroll = document.querySelector('#' + rootId + ' .ff-cal-scroll');
-          if (currentScroll && currentScroll.scrollTop === 0) currentScroll.scrollTop = initialScrollTop;
+          if (currentScroll && currentScroll.scrollTop === 0) {
+            currentScroll.scrollTop = initialScrollTop;
+            state.calendarInitialScroll = currentScroll.scrollTop > 0;
+          }
         }, 80);
-      }
+      } else if (nextScroll && priorScrollTop != null) nextScroll.scrollTop = priorScrollTop;
       setupCalendarNativeScroll(root.querySelector('.ff-calendar'));
     } catch (err) {
       state.error = err && err.message ? err.message : '發生未預期的錯誤';
