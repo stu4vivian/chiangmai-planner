@@ -229,9 +229,11 @@ document.addEventListener('pointerdown', onItemDown, true);
 
 // ── 庫頁（Task 17 §4.8）：膠囊篩選＋triage＋三行列＋行內快標 tier ──
 const CAP_DEFS=[
+  {key:'types', label:'類型', kind:'set', opts:()=>categoriesList().filter(c=>places.some(p=>p.type===c.key)).map(c=>[c.key,c.icon+' '+c.label]), valLabel:v=>{const c=categoriesList().find(c=>c.key===v);return c?c.label:v;}},
   {key:'areas', label:'地區', kind:'set', opts:()=>regionsList().filter(r=>places.some(p=>p.area===r.key)).map(r=>[r.key,r.label])},
   {key:'tiers', label:'Tier', kind:'set', opts:()=>[1,2,3,4].map(t=>[t,TIER_LABEL[t]+' tier'+t]), valLabel:v=>TIER_LABEL[v]},
   {key:'bands', label:'價格', kind:'set', opts:()=>(TRIP.priceBands.tiers||[]).map(t=>[t.label,t.label])},
+  {key:'cuisines', label:'菜系', kind:'set', opts:()=>(TRIP.cuisinesList||[]).filter(c=>places.some(p=>p.cuisine===c.key)).map(c=>[c.key,c.label])},
   {key:'slots', label:'時段', kind:'set', opts:()=>[['morning','早'],['noon','中午'],['evening','晚上']]},
   {key:'sched', label:'狀態', kind:'sched'}
 ];

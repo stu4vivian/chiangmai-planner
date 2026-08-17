@@ -203,8 +203,8 @@ function initMap(){
   if(!pendingSpot) renderMarkers();   // 有 pendingSpot 時跳過首次同步渲染：交給 openDrawer 的 deferred render（invalidateSize 後 marker 才有 el，spotlight 才套得上）
 }
 // ── 統一篩選狀態（Task 17）：庫頁列表＋地圖 marker 共用同一份 libF（雙向同步）──
-let libF={areas:new Set(), tiers:new Set(), bands:new Set(), cuisines:new Set(), slots:new Set(), sched:'all', q:''};
-function passLib(p){ return CNXCore.passLibFilters(p, {types:new Set(),areas:libF.areas,tiers:libF.tiers,bands:libF.bands,cuisines:libF.cuisines,slots:libF.slots,sched:libF.sched}, {plan, bands:TRIP.priceBands}); }
+let libF={types:new Set(), areas:new Set(), tiers:new Set(), bands:new Set(), cuisines:new Set(), slots:new Set(), sched:'all', q:''};
+function passLib(p){ return CNXCore.passLibFilters(p, {types:libF.types,areas:libF.areas,tiers:libF.tiers,bands:libF.bands,cuisines:libF.cuisines,slots:libF.slots,sched:libF.sched}, {plan, bands:TRIP.priceBands}); }
 function matchQ(p){ const q=(libF.q||'').trim().toLowerCase(); if(!q) return true; return ((p.name||'')+' '+(p.note||'')).toLowerCase().includes(q); }
 
 const TIER_LABEL={1:'①',2:'②',3:'③',4:'④'};

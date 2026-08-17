@@ -1282,7 +1282,11 @@
       }
       var editedItem = next.plan.find(function (item) { return item.id === editor.id; });
       if (editedItem) {
-        if (editedItem.custom) editedItem.custom.title = editor.title.trim();
+        // 卡片只有一個標題＝庫卡名。掛著庫卡的行程不留自己的標題，否則那串字會躺在資料裡，
+        // 哪天被同步回庫卡就把地點名字蓋掉（「住宿 Himku」被寫成「前往 Himku」就是這樣來的）。
+        // 要不一樣的描述，就開一張不掛庫卡的描述卡。
+        if (editedItem.placeId) { if (editedItem.custom) delete editedItem.custom.title; }
+        else if (editedItem.custom) editedItem.custom.title = editor.title.trim();
         // 一欄備註：有地點卡就存地點卡，並把舊的單次備註搬空（避免同一段字在兩處各存一份）。
         if (editor.placeId && editor.placeCard) { editor.placeCard.note = editor.note || ''; editedItem.notes = ''; }
         else editedItem.notes = editor.note || '';
