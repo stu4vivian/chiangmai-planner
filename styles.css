@@ -1287,7 +1287,6 @@
   /* 並排的矮卡只有 47px 寬：不能沿用 density-small 的 nowrap，否則「換匯」直接變成「✈️…」。 */
   .ff-cal-card.is-crowded.density-small .ff-cal-card-main{display:block;}
   .ff-cal-card.is-crowded.density-small .ff-cal-card-title{white-space:normal;overflow-wrap:anywhere;}
-  .ff-cal-card.is-fixed .ff-cal-card-main{padding-right:5px;}
   .ff-cal-card.is-hours-warning{outline:2px solid #c84a4a;outline-offset:-1px;box-shadow:0 2px 6px rgba(181,69,69,.18);}
   .ff-cal-card-hours{display:block;color:var(--danger);font-size:10px;font-weight:800;line-height:1.25;overflow-wrap:anywhere;}
   .ff-cal-card.is-selected{z-index:12;outline:2px solid var(--ink);outline-offset:1px;box-shadow:0 5px 14px rgba(20,20,35,.2);}

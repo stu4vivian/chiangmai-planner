@@ -79,7 +79,6 @@
     }
     var fine = clone(out.fine);
     fine.originalDurationMin = asInt(fine.originalDurationMin, duration, 1);
-    fine.fixedMarker = !!fine.fixedMarker;
     fine.manualOrder = asInt(fine.manualOrder, 0, 0);
     out.fine = fine;
     out.startTime = fine.startAt.slice(11, 16);
@@ -175,13 +174,10 @@
     };
   }
 
-  // 固定＝「標記為固定行程」；航班／已預訂交通在資料遷移時就寫進 fine.fixedMarker，不再靠 scheduleKind 判斷。
-  function isFixed(item) {
-    return !!(item && item.fine && item.fine.fixedMarker);
-  }
-
+  // 「固定行程」整組退役（Vivian 2026-08-17）：欄位、勾選框、卡片標記與這裡的判斷一起刪。
+  // 現在只要有 fine 區間就能被「連動後面」推走，航班也一樣——她要的就是工具不要自己替她擋。
   function isAutoMovable(item) {
-    return !!(item && item.fine) && !isFixed(item);
+    return !!(item && item.fine);
   }
 
   function continuousMovableBlock(schedule, startIndex, options) {
@@ -191,7 +187,7 @@
     var out = [];
     for (var i = Math.max(0, startIndex); i < items.length; i++) {
       var item = items[i];
-      if ((!options.allowFixedStart || i !== startIndex) && !isAutoMovable(item)) break;
+      if (!isAutoMovable(item)) break;
       if (i > startIndex) {
         var previous = occurrenceInterval(items[i - 1]);
         var current = occurrenceInterval(item);
@@ -202,16 +198,6 @@
     }
     return out;
   }
-
-  function findFixedAnchor(schedule, startIndex, direction) {
-    var items = asSchedule(schedule).items;
-    var step = direction === 'backward' || direction === -1 ? -1 : 1;
-    for (var i = startIndex; i >= 0 && i < items.length; i += step) {
-      if (isFixed(items[i])) return items[i];
-    }
-    return null;
-  }
-
 
   function changeTimes(item, request) {
     var out = clone(item);
@@ -225,7 +211,6 @@
     out.fine.endAt = endAt;
     out.startTime = startAt.slice(11, 16);
     if (hasEnd && !out.fine.originalDurationMin) out.fine.originalDurationMin = interval.durationMin;
-    if (Object.prototype.hasOwnProperty.call(request, 'fixedMarker')) out.fine.fixedMarker = !!request.fixedMarker;
     return out;
   }
 
@@ -615,7 +600,6 @@
     previewSwap: previewSwap,
     applyTransaction: applyTransaction,
     continuousMovableBlock: continuousMovableBlock,
-    findFixedAnchor: findFixedAnchor,
     baseFingerprint: baseFingerprint,
     fingerprintSchedule: baseFingerprint,
     invertTransaction: invertTransaction

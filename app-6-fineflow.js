@@ -443,7 +443,7 @@
   // .ff-calendar > .ff-cal-toolbar + .ff-cal-date-row + .ff-cal-scroll + .ff-cal-fab
   // .ff-cal-scroll > .ff-cal-time-gutter + .ff-cal-days > .ff-cal-day
   // .ff-cal-day > .ff-cal-slot（空白命中層）+ .ff-cal-card（絕對定位）
-  // 卡片狀態：.density-{small|medium|large}、.is-hours-warning、.is-fixed、.is-selected、.is-preview
+  // 卡片狀態：.density-{small|medium|large}、.is-hours-warning、.is-selected、.is-preview
   // Sheet：.ff-source-sheet、.ff-detail-sheet、.ff-create-sheet；CSS 只需鎖在 #pg-fineflow / .ff-sheet。
   function calendarApi() { return window.CNXFineFlowCalendar || {}; }
 
@@ -625,7 +625,6 @@
     var classes = ['ff-cal-card', 'density-' + card.density];
     if (card.laneCount > 1) classes.push('is-crowded');   // 並排＝寬度砍半，CSS 只留店名（時間靠時間軸位置讀）
     if (warningText) classes.push('is-hours-warning');
-    if (card.fixed) classes.push('is-fixed');
     if (selected) classes.push('is-selected');
     if (armed) classes.push('is-armed');
     var left = 1.5 + card.leftPercent * 0.92;
@@ -635,7 +634,7 @@
         '<strong class="ff-cal-card-title"><span class="ff-cal-type-icon" aria-hidden="true">' + h(card.categoryIcon || '📍') + '</span>' + h(card.title) + '</strong>' +
         '<span class="ff-cal-card-time">' + h(card.startLabel + '–' + card.endLabel) + '</span>' +
         (warningText ? '<span class="ff-cal-card-hours">' + h(warningText) + '</span>' : '') + note + todo +
-        '<span class="ff-cal-card-flags">' + (card.fixed ? '<span title="固定">📌</span>' : '') + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
+        '<span class="ff-cal-card-flags">' + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
       '</div>' +
       (map ? '<a class="ff-cal-card-map-link" href="' + h(map) + '" target="_blank" rel="noopener noreferrer" aria-label="在 Google Maps 開啟' + h(card.title) + '">Maps ↗</a>' : '') +
       cardControls +
@@ -754,7 +753,6 @@
       occurrenceId: item.id, itemId: item.id, day: dayIdForDate(date),
       sourceDay: fineDayId(item), targetDay: dayIdForDate(date),
       startAt: startAt, endAt: endAt, newStartAt: startAt, newEndAt: endAt,
-      fixedMarker: !!editor.fixedMarker,
       targetOccurrenceId: editor.targetId || null, swapWithOccurrenceId: editor.targetId || null,
       rules: { maxContinuousGapMin: 90 }
     };
@@ -764,10 +762,9 @@
     var after = copy(item);
     var duration = Math.round((Date.parse(request.endAt) - Date.parse(request.startAt)) / 60000);
     after.fine = Object.assign({
-      originalDurationMin: duration, fixedMarker: false, manualOrder: 0
+      originalDurationMin: duration, manualOrder: 0
     }, after.fine || {}, {
       startAt: request.startAt, endAt: request.endAt,
-      fixedMarker: request.fixedMarker
     });
     after.startTime = timeFromIso(request.startAt);
     var base = schedule && !Array.isArray(schedule) ? copy(schedule) : { day: fineDayId(item), timeZone: typeof TRIP !== 'undefined' && TRIP.timeZone, items: [], unscheduled: [] };
@@ -1167,7 +1164,6 @@
       openPicker: '', sheetH: 0,
       confirmDelete: false, confirmTodoDelete: null, confirmDiscard: null, confirmRipple: null,
       durationMin: duration, firstSchedule: !item.fine,
-      fixedMarker: !!(item.fine && item.fine.fixedMarker),
       coarseVisible: !!(item.day && item.slot), originalCoarseVisible: !!(item.day && item.slot), coarseDay: item.day || dayIdForDate(fineDate(item)),
       coarseSlot: item.slot || slotFromTime(start),
       originalCoarseSlot: item.slot || slotFromTime(start),
@@ -1360,7 +1356,7 @@
 
   function openCustom(dayId) {
     var options = (typeof DAYS !== 'undefined' ? DAYS : []).map(function (day) { return '<option value="' + h(day.id) + '"' + (day.id === (dayId || state.day) ? ' selected' : '') + '>' + h(day.label + '（' + day.wd + '）') + '</option>'; }).join('');
-    openSheet('<div class="ff-sheet ff-custom-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-add-title"><div class="ff-sheet-head"><span class="ff-kicker">新增</span><h3 id="ff-add-title">自訂行程</h3><p>適合起床、退房、排隊或沒有地點卡的活動。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>行程名稱</span><input id="ff_custom_title" maxlength="80" placeholder="例如：起床、整理行李"></label><label class="ff-field"><span>日期</span><select id="ff_custom_day">' + options + '</select></label><div class="ff-time-fields"><label class="ff-field"><span>開始</span><input id="ff_custom_start" type="time" value="09:00"></label><span aria-hidden="true">→</span><label class="ff-field"><span>結束</span><input id="ff_custom_end" type="time" value="10:00"></label></div><label class="ff-fixed-check"><input id="ff_custom_fixed" type="checkbox"><span>標記為固定行程</span></label></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-add-save">新增行程</button></div></div>', function () { openCustom(dayId); }, 'fineflow-custom');
+    openSheet('<div class="ff-sheet ff-custom-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-add-title"><div class="ff-sheet-head"><span class="ff-kicker">新增</span><h3 id="ff-add-title">自訂行程</h3><p>適合起床、退房、排隊或沒有地點卡的活動。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>行程名稱</span><input id="ff_custom_title" maxlength="80" placeholder="例如：起床、整理行李"></label><label class="ff-field"><span>日期</span><select id="ff_custom_day">' + options + '</select></label><div class="ff-time-fields"><label class="ff-field"><span>開始</span><input id="ff_custom_start" type="time" value="09:00"></label><span aria-hidden="true">→</span><label class="ff-field"><span>結束</span><input id="ff_custom_end" type="time" value="10:00"></label></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-add-save">新增行程</button></div></div>', function () { openCustom(dayId); }, 'fineflow-custom');
     setTimeout(function () { var input = document.getElementById('ff_custom_title'); if (input) input.focus(); }, 0);
   }
 
@@ -1390,7 +1386,6 @@
       id: typeof uid === 'function' ? uid() : 'ff_' + Date.now(), placeId: null,
       custom: { title: title, kind: 'life' }, day: null, slot: null, startTime: start,
       fine: { startAt: startAt, endAt: endAt, originalDurationMin: duration,
-        fixedMarker: !!(document.getElementById('ff_custom_fixed') || {}).checked,
         manualOrder: activePlan().length },
       scheduleKind: 'custom', travelMode: '', todos: [], seq: activePlan().length
     };
@@ -1526,7 +1521,7 @@
     var draft = ensureCreateTimingDraft('新增行程');
     var categories = typeof categoriesList === 'function' ? categoriesList() : [];
     var options = categories.map(function (category) { return '<option value="' + h(category.key) + '">' + h((category.icon || '') + ' ' + category.label) + '</option>'; }).join('');
-    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-create-title"><div class="ff-sheet-head"><span class="ff-kicker">自訂行程</span><h3 id="ff-create-title">新增自訂行程</h3><p>卡片會使用所選類別的同色系淺色。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>行程名稱</span><input data-ff-create-title maxlength="80" placeholder="例如：起床、整理行李"></label><label class="ff-field"><span>類別</span><select data-ff-create-category>' + options + '</select></label><label class="ff-field"><span>備註</span><textarea data-ff-create-notes maxlength="500" placeholder="選填"></textarea></label>' + creationTimingFields(draft) + creationCoarseFields(draft) + '<label class="ff-fixed-check"><input type="checkbox" data-ff-create-fixed><span>標記為固定行程</span></label><div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="custom">新增行程</button></div></div>', function () { openCustomCreate(); }, 'fineflow-create-custom');
+    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-create-title"><div class="ff-sheet-head"><span class="ff-kicker">自訂行程</span><h3 id="ff-create-title">新增自訂行程</h3><p>卡片會使用所選類別的同色系淺色。</p></div><div class="ff-sheet-scroll"><label class="ff-field"><span>行程名稱</span><input data-ff-create-title maxlength="80" placeholder="例如：起床、整理行李"></label><label class="ff-field"><span>類別</span><select data-ff-create-category>' + options + '</select></label><label class="ff-field"><span>備註</span><textarea data-ff-create-notes maxlength="500" placeholder="選填"></textarea></label>' + creationTimingFields(draft) + creationCoarseFields(draft) + '<div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="custom">新增行程</button></div></div>', function () { openCustomCreate(); }, 'fineflow-create-custom');
   }
 
   function openPlaceCreate() {
@@ -1557,7 +1552,7 @@
       }
     }
     var cardMap = safeMapsUrl(place.mapsUrl || (typeof gmaps === 'function' ? gmaps(place) : ''));
-    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-place-time-title"><div class="ff-sheet-head"><span class="ff-kicker">行程卡片</span><h3 id="ff-place-time-title">' + h(place.name) + '</h3><p>' + (occurrenceId ? '正在替粗流的同一筆行程補上精確時間。' : (cardMap ? 'Maps 連結會由這張行程卡片自動帶入，不必重貼。' : '這張行程卡片目前沒有 Maps 連結。')) + '</p></div><div class="ff-sheet-scroll">' + (cardMap ? '<a class="ff-card-map-preview" href="' + h(cardMap) + '" target="_blank" rel="noopener noreferrer">⌖ 查看卡片的 Maps 連結</a>' : '') + creationTimingFields(state.createDraft) + creationCoarseFields(state.createDraft) + '<label class="ff-fixed-check"><input type="checkbox" data-ff-create-fixed><span>標記為固定行程</span></label><div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="place-card">' + (occurrenceId ? '排進細流' : '新增行程') + '</button></div></div>', function () { openPlaceTiming(placeId, occurrenceId); }, 'fineflow-create-place-time');
+    openSheet('<div class="ff-sheet ff-create-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-place-time-title"><div class="ff-sheet-head"><span class="ff-kicker">行程卡片</span><h3 id="ff-place-time-title">' + h(place.name) + '</h3><p>' + (occurrenceId ? '正在替粗流的同一筆行程補上精確時間。' : (cardMap ? 'Maps 連結會由這張行程卡片自動帶入，不必重貼。' : '這張行程卡片目前沒有 Maps 連結。')) + '</p></div><div class="ff-sheet-scroll">' + (cardMap ? '<a class="ff-card-map-preview" href="' + h(cardMap) + '" target="_blank" rel="noopener noreferrer">⌖ 查看卡片的 Maps 連結</a>' : '') + creationTimingFields(state.createDraft) + creationCoarseFields(state.createDraft) + '<div class="ff-create-error" role="alert"></div></div><div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-create-save" data-kind="place-card">' + (occurrenceId ? '排進細流' : '新增行程') + '</button></div></div>', function () { openPlaceTiming(placeId, occurrenceId); }, 'fineflow-create-place-time');
   }
 
   function openMapsCreate() {
@@ -1569,7 +1564,7 @@
 
   function creationValues() {
     function value(selector) { var el = sh.querySelector(selector); return el ? String(el.value || '').trim() : ''; }
-    return { title: value('[data-ff-create-title]'), date: value('[data-ff-create-date]'), start: value('[data-ff-create-start]'), end: value('[data-ff-create-end]'), mapsUrl: value('[data-ff-create-maps]'), category: value('[data-ff-create-category]'), notes: value('[data-ff-create-notes]'), fixed: !!(sh.querySelector('[data-ff-create-fixed]') || {}).checked, coarseVisible: !!(sh.querySelector('[data-ff-create-coarse]') || {}).checked, coarseDay: dayIdForDate(value('[data-ff-create-date]')), coarseSlot: value('[data-ff-create-coarse-slot]') };
+    return { title: value('[data-ff-create-title]'), date: value('[data-ff-create-date]'), start: value('[data-ff-create-start]'), end: value('[data-ff-create-end]'), mapsUrl: value('[data-ff-create-maps]'), category: value('[data-ff-create-category]'), notes: value('[data-ff-create-notes]'), coarseVisible: !!(sh.querySelector('[data-ff-create-coarse]') || {}).checked, coarseDay: dayIdForDate(value('[data-ff-create-date]')), coarseSlot: value('[data-ff-create-coarse-slot]') };
   }
 
   function showCreationError(message) {
@@ -1613,7 +1608,7 @@
       category: kind === 'custom' ? (values.category || '其他') : (place && place.type || values.category || '其他'),
       notes: values.notes || '',
       mapLinks: [],
-      fine: { startAt: zonedIso(values.date, values.start), endAt: zonedIso(values.date, values.end), originalDurationMin: duration, fixedMarker: values.fixed, manualOrder: activePlan().length },
+      fine: { startAt: zonedIso(values.date, values.start), endAt: zonedIso(values.date, values.end), originalDurationMin: duration, manualOrder: activePlan().length },
       scheduleKind: kind === 'custom' ? 'custom' : 'place', travelMode: '', todos: [], seq: activePlan().length
     };
     var occurrence = typeof CNXCore !== 'undefined' && typeof CNXCore.normalizeOccurrence === 'function' ? CNXCore.normalizeOccurrence(raw) : raw;
@@ -2551,7 +2546,6 @@
       endAt: zonedAtMinute(preview.date, preview.end),
       newStartAt: zonedAtMinute(preview.date, preview.start),
       newEndAt: zonedAtMinute(preview.date, preview.end),
-      fixedMarker: !!item.fine.fixedMarker,
       rules: { maxContinuousGapMin: 90 }
     };
   }

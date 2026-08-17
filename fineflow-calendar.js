@@ -285,8 +285,7 @@
       palette: deriveCategoryPalette(color),
       mapsUrl: place && typeof place.mapsUrl === 'string' ? place.mapsUrl : '',
       note: occurrence && typeof occurrence.notes === 'string' && occurrence.notes ? occurrence.notes : place && typeof place.note === 'string' ? place.note : '',
-      todos: todoSummary(occurrence && occurrence.todos),
-      fixed: !!(occurrence && occurrence.fine && occurrence.fine.fixedMarker)
+      todos: todoSummary(occurrence && occurrence.todos)
     };
   }
 

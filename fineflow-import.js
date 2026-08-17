@@ -396,7 +396,6 @@
         originalDurationMin: durationMin,
         minDurationMin: constraints.minDurationMinutes,
         compressibility: constraints.minDurationMinutes < durationMin ? 'suggest' : 'none',
-        fixedMarker: constraints.fixed,
         intentionalGapBefore: false,
         acceptedConflictWith: [],
         timeCommitment: constraints.fixed ? 'external' : 'flexible',

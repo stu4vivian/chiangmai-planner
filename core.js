@@ -373,7 +373,6 @@
       originalDurationMin: original,
       minDurationMin: minimum,
       compressibility: COMPRESSIBILITY[value.compressibility] ? value.compressibility : 'none',
-      fixedMarker: value.fixedMarker === true,
       intentionalGapBefore: value.intentionalGapBefore === true,
       acceptedConflictWith: acceptedConflictWith,
       timeCommitment: TIME_COMMITMENTS[value.timeCommitment] ? value.timeCommitment : 'flexible',
@@ -501,8 +500,6 @@
     if (out.fine && typeof out.fine === 'object') {
       out.fine = Object.assign({}, out.fine);
       out.fine.minDurationMin = Math.max(safeNonNegativeInt(out.fine.minDurationMin, 0), safeNonNegativeInt(transport.minDurationMin, 0));
-      // 航班與已預訂交通原本靠 classifyTransportOccurrence 判定固定；classify 拿掉後改寫成使用者可見的固定標記，才不會被「連動後面」推走。
-      if (e.scheduleKind === 'booked_transport' || e.scheduleKind === 'flight') out.fine.fixedMarker = true;
     }
     if (!safeStr(out.category).trim()) out.category = '交通';
     out.scheduleKind = (typeof e.placeId === 'string' && e.placeId) ? 'place' : 'custom';
