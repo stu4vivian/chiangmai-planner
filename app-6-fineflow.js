@@ -618,8 +618,10 @@
         if (hour * 60 === DAWN_FROM) html += '<span class="ff-cal-dawn-gap" style="height:' + DAWN_STRIP + 'px"></span>';
         continue;
       }
+      // 「上午 10:00」→「上午 10」：整點的 :00 沒有資訊量，省下來的寬度全部讓給日期欄
+      // （Vivian 2026-08-20：時間軸再窄一點、日期欄寬一點）。
       var period = hour < 12 ? '上午' : '下午';
-      html += '<span class="ff-cal-time" style="--ff-hour:' + hour + '">' + period + ' ' + (hour % 12 || 12) + ':00</span>';
+      html += '<span class="ff-cal-time" style="--ff-hour:' + hour + '">' + period + ' ' + (hour % 12 || 12) + '</span>';
     }
     return html + '</div>';
   }
