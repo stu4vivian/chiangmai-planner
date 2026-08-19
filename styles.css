@@ -1024,6 +1024,18 @@
   .ff-todo-row.done{color:var(--faint);}
   .ff-todo-row.done .ff-check{background:var(--ok);border-color:var(--ok);}
   .ff-todo-row.done b{text-decoration:line-through;}
+  .ff-todo-line{display:grid;grid-template-columns:minmax(0,1fr) 34px;align-items:center;}
+  .ff-todo-edit-btn{height:34px;border:0;border-bottom:.5px solid var(--line);background:#fff;color:var(--faint);font-size:14px;cursor:pointer;}
+  /* 未排項目借用來源挑選器那組列樣式，但那邊是「圖示｜名稱｜動作」三欄；這裡只有兩段字，改成上下排 */
+  .ff-todo-sheet .ff-source-place-row{display:block;min-height:0;padding:11px 0;}
+  .ff-todo-sheet .ff-source-place-row b{display:block;font-size:12.5px;line-height:1.35;}
+  .ff-todo-sheet .ff-source-place-row small{display:block;margin-top:3px;font-size:9.5px;color:var(--faint);}
+  .ff-todo-subhead{margin:18px 0 6px;font-size:10.5px;font-weight:700;color:var(--faint);letter-spacing:.04em;}
+  /* 編輯卡的待辦列：勾選鈕＋可編輯輸入框（Vivian 2026-08-20：待辦要能改字） */
+  .ff-todo-check{padding:0;border:0;background:transparent;cursor:pointer;}
+  .ff-todo-row input.ff-detail-todo-text{width:100%;min-width:0;height:auto;margin:0;padding:3px 5px;border:0;border-radius:6px;background:transparent;color:inherit;font-family:inherit;font-size:16px;line-height:1.35;}
+  .ff-todo-row input.ff-detail-todo-text:focus{outline:0;background:#f1f3f4;}
+  .ff-todo-row.done .ff-detail-todo-text{text-decoration:line-through;color:var(--faint);}
 
   @media(max-width:389px){
     #pg-fineflow{padding-left:10px;padding-right:10px;}
@@ -1100,29 +1112,11 @@
   }
   .ff-cal-toolbar>button:active{background:var(--surface-2);}
   .ff-cal-toolbar>.ff-cal-nav{display:none;}
+  .ff-cal-toolbar>.ff-cal-todo-btn{width:auto;height:28px;display:flex;align-items:center;gap:4px;margin-right:6px;padding:0 8px;border-radius:9px;background:#f1f3f4;color:#686a71;font:700 12px/1 var(--ff);}
+  .ff-cal-toolbar>.ff-cal-todo-btn b{font-size:11px;font-variant-numeric:tabular-nums;}
   .ff-cal-view-switch{display:flex!important;align-items:center;gap:2px;padding:3px;border-radius:9px;background:#f1f3f4;}
   .ff-cal-view-switch button{min-width:29px;height:28px;padding:0 7px;border:0;border-radius:7px;background:transparent;color:#686a71;font-family:inherit;font-size:10px;font-weight:750;cursor:pointer;}
   .ff-cal-view-switch button[aria-pressed="true"]{background:#fff;color:#1a73e8;box-shadow:0 1px 2px rgba(30,32,37,.12);}
-
-  .ff-cal-unscheduled{
-    flex:none;
-    min-height:40px;
-    display:flex;
-    align-items:center;
-    gap:8px;
-    padding:6px 12px 6px calc(var(--ff-cal-gutter) + 9px);
-    border:0;
-    border-bottom:.5px solid var(--line);
-    background:#fff;
-    color:var(--ink2);
-    font-family:inherit;
-    font-size:11px;
-    font-weight:700;
-    text-align:left;
-    cursor:pointer;
-  }
-  .ff-cal-unscheduled[hidden],.ff-cal-empty[hidden]{display:none;}
-  .ff-cal-unscheduled b{min-width:22px;height:22px;display:grid;place-items:center;margin-left:auto;border-radius:999px;background:var(--surface-2);font-size:10px;font-variant-numeric:tabular-nums;}
 
   .ff-cal-date-row{
     position:sticky;
@@ -1132,7 +1126,7 @@
     display:grid;
     grid-template-columns:var(--ff-cal-gutter) minmax(0,1fr);
     min-width:0;
-    height:49px;
+    height:30px;
     border-bottom:1px solid var(--line);
     background:rgba(255,255,255,.98);
   }
@@ -1140,10 +1134,10 @@
   .ff-cal-date-viewport{min-width:0;height:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;touch-action:pan-x;}
   .ff-cal-date-viewport::-webkit-scrollbar,.ff-cal-days-viewport::-webkit-scrollbar{display:none;}
   .ff-cal-date-track{height:100%;display:grid;grid-template-columns:repeat(var(--ff-cal-track-columns),minmax(0,1fr));width:calc(100% * var(--ff-cal-track-columns) / var(--ff-cal-columns));}
-  .ff-cal-date{min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:.5px solid var(--line);line-height:1.05;scroll-snap-align:start;scroll-snap-stop:always;}
+  .ff-cal-date{min-width:0;display:flex;flex-direction:row;align-items:baseline;justify-content:center;gap:4px;border-right:.5px solid var(--line);line-height:1.05;scroll-snap-align:start;scroll-snap-stop:always;}
   .ff-cal-date:last-child{border-right:0;}
   .ff-cal-date span{font-size:9px;font-weight:700;color:var(--muted);white-space:nowrap;}
-  .ff-cal-date b{margin-top:4px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .ff-cal-date b{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
 
   .ff-cal-scroll{
     position:relative;
@@ -1160,9 +1154,14 @@
     -webkit-overflow-scrolling:touch;
     background:#fff;
   }
+  .ff-cal-dawn-gap{display:block;}
+  .ff-cal-dawn-strip{position:absolute;left:0;right:0;z-index:14;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 10px;border:0;border-top:.5px solid var(--line);border-bottom:.5px solid var(--line);background:#f6f7f8;color:var(--faint);font-family:inherit;font-size:9.5px;cursor:pointer;}
+  .ff-cal-dawn-strip b{font-weight:700;color:var(--ink2);}
   .ff-cal-time-gutter{position:relative;z-index:5;width:var(--ff-cal-gutter);height:var(--ff-cal-height);background:#fff;border-right:.5px solid #e6e9ec;}
   .ff-cal-time{display:block;height:var(--ff-cal-hour);padding:0 6px 0 2px;transform:translateY(-.48em);color:var(--faint);font-size:8.5px;line-height:1;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}
   .ff-cal-time:first-child{padding-top:3px;transform:none;}
+  /* 凌晨細帶正下方那個鐘點（07:00）預設會往上位移半行 → 被細帶蓋住，改成貼齊帶子下緣 */
+  .ff-cal-dawn-gap+.ff-cal-time{padding-top:3px;transform:none;}
   .ff-cal-days-viewport{position:relative;min-width:0;width:100%;height:var(--ff-cal-height);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;}
   .ff-cal-days{position:relative;display:grid;grid-template-columns:repeat(var(--ff-cal-track-columns),minmax(0,1fr));width:calc(100% * var(--ff-cal-track-columns) / var(--ff-cal-columns));min-width:0;height:var(--ff-cal-height);}
   .ff-cal-day{position:relative;min-width:0;height:var(--ff-cal-height);border-right:.5px solid #e6e9ec;background:#fff;scroll-snap-align:start;scroll-snap-stop:always;}
@@ -1368,7 +1367,7 @@
   .ff-cal-card:focus-within .ff-cal-resize,
   .ff-cal-card.is-selected .ff-cal-resize,
   .ff-cal-card.is-preview .ff-cal-resize{display:block;}
-  .ff-cal-card-main:focus-visible,.ff-cal-drag-handle:focus-visible,.ff-cal-resize:focus-visible,.ff-cal-toolbar>button:focus-visible,.ff-cal-unscheduled:focus-visible,.ff-cal-fab:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+  .ff-cal-card-main:focus-visible,.ff-cal-drag-handle:focus-visible,.ff-cal-resize:focus-visible,.ff-cal-toolbar>button:focus-visible,.ff-cal-fab:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
 
   @media (pointer:coarse){
     /* 手機平常一條輔助標誌都不畫（Vivian：「不畫那些輔助標誌但可以使用」）。
@@ -1416,6 +1415,7 @@
     text-align:center;
     pointer-events:none;
   }
+  .ff-cal-empty[hidden]{display:none;}
   .ff-cal-fab{
     position:absolute;
     right:18px;

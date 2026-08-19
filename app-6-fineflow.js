@@ -483,6 +483,30 @@
     return calendarIsDesktop() ? 60 : 48;
   }
 
+  // ── 凌晨收合（Vivian 2026-08-20：「凌晨兩點到早上七點根本不會用到」）──
+  // 02:00–07:00 這 5 小時（手機 240px、桌機 300px）壓成一條 22px 的細帶，點一下展開。
+  // 做法是「畫面 px ↔ 真實 px」的單調可逆轉換：所有 top/height 都經過 calPx()，
+  // 指標換算（拖曳／新增）走 calPxInverse()，這樣拖拉行為完全不用改。
+  var DAWN_FROM = 120, DAWN_TO = 420, DAWN_STRIP = 22;
+  function dawnCollapsed() { return !state.dawnOpen && !state.dawnHasCards; }
+  function dawnBandStart() { return DAWN_FROM * calendarPixelsPerHour() / 60; }
+  function dawnBandEnd() { return DAWN_TO * calendarPixelsPerHour() / 60; }
+  function calPx(px) {
+    if (!dawnCollapsed()) return px;
+    var a = dawnBandStart(), b = dawnBandEnd();
+    if (px <= a) return px;
+    if (px >= b) return px - (b - a) + DAWN_STRIP;
+    return a + DAWN_STRIP * (px - a) / (b - a);
+  }
+  function calPxInverse(px) {
+    if (!dawnCollapsed()) return px;
+    var a = dawnBandStart(), b = dawnBandEnd();
+    if (px <= a) return px;
+    if (px >= a + DAWN_STRIP) return px + (b - a) - DAWN_STRIP;
+    return a + (px - a) * (b - a) / DAWN_STRIP;
+  }
+  function calendarHeightPx() { return calPx(calendarPixelsPerHour() * 24); }
+
   function clampCalendarAnchor(dateText) {
     var start = typeof TRIP !== 'undefined' && TRIP && TRIP.startDate;
     var end = typeof TRIP !== 'undefined' && TRIP && TRIP.endDate;
@@ -590,6 +614,10 @@
   function renderTimeGutter() {
     var html = '<div class="ff-cal-time-gutter" aria-hidden="true">';
     for (var hour = 0; hour < 24; hour++) {
+      if (dawnCollapsed() && hour * 60 >= DAWN_FROM && hour * 60 < DAWN_TO) {
+        if (hour * 60 === DAWN_FROM) html += '<span class="ff-cal-dawn-gap" style="height:' + DAWN_STRIP + 'px"></span>';
+        continue;
+      }
       var period = hour < 12 ? '上午' : '下午';
       html += '<span class="ff-cal-time" style="--ff-hour:' + hour + '">' + period + ' ' + (hour % 12 || 12) + ':00</span>';
     }
@@ -599,6 +627,10 @@
   function renderSlots(day) {
     var html = '';
     for (var minute = 0; minute < 1440; minute += 30) {
+      if (dawnCollapsed() && minute >= DAWN_FROM && minute < DAWN_TO) {
+        if (minute === DAWN_FROM) html += '<span class="ff-cal-dawn-gap" style="height:' + DAWN_STRIP + 'px"></span>';
+        continue;
+      }
       var time = String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0');
       html += '<button type="button" class="ff-cal-slot" data-action="ff-create-at" data-day="' + h(day.dayId) + '" data-date="' + h(day.date) + '" data-time="' + time + '" style="--ff-minute:' + minute + '" aria-label="' + h(day.date + ' ' + time + ' 新增行程') + '"></button>';
     }
@@ -630,7 +662,7 @@
     var left = 1.5 + card.leftPercent * 0.92;
     var width = card.widthPercent * 0.92;
     // 卡片上下各縮 1px：時段前後緊接的行程原本高度剛好頂滿，貼在一起很醜，留一條細縫分開（Vivian 2026-08-19）。
-    var visualTop = card.top + 1, visualHeight = Math.max(card.height - 2, 10);
+    var visualTop = calPx(card.top) + 1, visualHeight = Math.max(calPx(card.top + card.height) - calPx(card.top) - 2, 10);
     return '<article class="' + classes.join(' ') + '" data-eid="' + h(card.id) + '" style="--ff-top:' + visualTop + 'px;--ff-height:' + visualHeight + 'px;--ff-left:' + left + '%;--ff-width:' + width + '%;--ff-card-bg:' + h(card.palette.background) + ';--ff-card-border:' + h(card.palette.border) + ';--ff-card-text:' + h(card.palette.text) + ';top:' + visualTop + 'px;height:' + visualHeight + 'px;left:' + left + '%;width:' + width + '%;background:' + h(card.palette.background) + ';border-color:' + h(card.palette.border) + ';color:' + h(card.palette.text) + '">' +
       '<div class="ff-cal-card-main" role="button" tabindex="0" data-action="ff-card-detail" data-eid="' + h(card.id) + '" data-ff-drag="card" aria-label="查看 ' + h(card.title) + '">' +
         '<strong class="ff-cal-card-title"><span class="ff-cal-type-icon" aria-hidden="true">' + h(card.categoryIcon || '📍') + '</span>' + h(card.title) + '</strong>' +
@@ -652,12 +684,25 @@
     var endText = draft.end || addMinutesToTime(draft.start, 60);
     var end = +endText.slice(0, 2) * 60 + +endText.slice(3);
     var pixelsPerHour = calendarPixelsPerHour();
-    var top = start * pixelsPerHour / 60;
-    var height = Math.max(20, (end - start) * pixelsPerHour / 60);
+    var top = calPx(start * pixelsPerHour / 60);
+    var height = Math.max(20, calPx(end * pixelsPerHour / 60) - top);
     return '<article class="ff-cal-card density-medium is-preview" data-draft="true" style="--ff-top:' + top + 'px;--ff-height:' + height + 'px;--ff-left:1.5%;--ff-width:92%;--ff-card-bg:#e8f0fe;--ff-card-border:#5b8def;--ff-card-text:#174ea6;top:' + top + 'px;height:' + height + 'px;left:1.5%;width:92%;background:#e8f0fe;border-color:#5b8def;color:#174ea6"><div class="ff-cal-card-main" aria-hidden="true"><strong class="ff-cal-card-title"><span class="ff-cal-type-icon">📍</span>' + h(draft.title || '新增行程') + '</strong><span class="ff-cal-card-time">' + h(draft.start + '–' + endText) + '</span></div></article>';
   }
 
+  // 凌晨那段真的有卡就不收（不然卡片會被壓進 22px 裡看不到）。
+  function calendarDawnHasCards(model) {
+    var pixelsPerHour = model.pixelsPerHour || calendarPixelsPerHour();
+    return model.days.some(function (day) {
+      return (day.cards || []).some(function (card) {
+        var startMinute = card.top * 60 / pixelsPerHour;
+        var endMinute = (card.top + card.height) * 60 / pixelsPerHour;
+        return endMinute > DAWN_FROM && startMinute < DAWN_TO;
+      });
+    });
+  }
+
   function renderCalendarPage(model) {
+    state.dawnHasCards = calendarDawnHasCards(model);
     var visibleDates = {};
     model.days.forEach(function (day) { visibleDates[day.date] = true; });
     var dates = model.trackDays.map(function (day) {
@@ -673,15 +718,21 @@
     var unscheduledItems = [];
     model.trackDays.forEach(function (day) { (day.unscheduled || []).forEach(function (item) { unscheduledItems.push(item); }); });
     var hiddenUnscheduled = unscheduledItems.map(function (item) { return '<span hidden data-action="ff-edit" data-eid="' + h(item.id) + '"></span>'; }).join('');
-    var unplanned = '<button type="button" class="ff-cal-unscheduled" data-action="ff-unscheduled"' + (model.unscheduledCount ? '' : ' hidden') + '><span>尚未排時間</span><b>□ ' + model.unscheduledCount + '</b></button>' + hiddenUnscheduled;
+    // 「尚未排時間」整條 bar 退役（Vivian 2026-08-20：手機版位很小）——未排項目改併進待辦清單那個浮層。
+    var unplanned = hiddenUnscheduled;
+    var openTodoCount = activePlan().reduce(function (total, item) {
+      return total + (item.todos || []).filter(function (todo) { return todo && todo.done !== true; }).length;
+    }, 0);
+    var todoButton = '<button type="button" class="ff-cal-todo-btn" data-action="ff-todos" aria-label="待辦與尚未排時間">☑<b>' + (openTodoCount + model.unscheduledCount) + '</b></button>';
     var empty = '<p class="ff-cal-empty"' + (model.days.every(function (day) { return !day.cards.length; }) ? '' : ' hidden') + '>點空白時段，或按右下角＋開始排細流</p>';
     var choices = model.mobile ? [1, 2, 3] : [5, 7];
+    var dawnStrip = '<button type="button" class="ff-cal-dawn-strip' + (dawnCollapsed() ? '' : ' is-open') + '" data-action="ff-dawn-toggle" style="top:' + dawnBandStart() + 'px;height:' + DAWN_STRIP + 'px"><span>凌晨 02:00–07:00</span><b>' + (dawnCollapsed() ? '展開' : '收起') + '</b></button>';
     var switcher = '<div class="ff-cal-view-switch" aria-label="顯示天數">' + choices.map(function (choice) { return '<button type="button" data-action="ff-calendar-count" data-count="' + choice + '" aria-pressed="' + (choice === model.visibleDayCount) + '">' + choice + (model.mobile && choice === 3 ? ' 日' : '') + '</button>'; }).join('') + '</div>';
     var stepLabel = model.mobile ? '一天' : model.visibleDayCount + '天';
-    return '<div class="ff-calendar" data-version="' + h(model.versionId) + '" data-mobile="' + model.mobile + '" data-anchor-index="' + model.anchorIndex + '" style="--ff-cal-columns:' + model.visibleDayCount + ';--ff-cal-track-columns:' + model.trackDayCount + ';--ff-cal-hour:' + model.pixelsPerHour + 'px;--ff-cal-height:' + model.pixelsPerHour * 24 + 'px;--ff-track-offset:' + model.trackOffset + '%">' +
-      '<div class="ff-cal-toolbar"><button type="button" class="ff-cal-nav" data-action="ff-prev-days" aria-label="往前' + stepLabel + '">‹</button><div class="ff-cal-range"><span>' + model.visibleDayCount + ' 日行程</span><strong>' + h(model.days[0].date + ' ～ ' + model.days[model.days.length - 1].date) + '</strong></div>' + switcher + '<button type="button" class="ff-cal-nav" data-action="ff-next-days" aria-label="往後' + stepLabel + '">›</button></div>' +
+    return '<div class="ff-calendar" data-version="' + h(model.versionId) + '" data-mobile="' + model.mobile + '" data-anchor-index="' + model.anchorIndex + '" style="--ff-cal-columns:' + model.visibleDayCount + ';--ff-cal-track-columns:' + model.trackDayCount + ';--ff-cal-hour:' + model.pixelsPerHour + 'px;--ff-cal-height:' + calendarHeightPx() + 'px;--ff-track-offset:' + model.trackOffset + '%">' +
+      '<div class="ff-cal-toolbar"><button type="button" class="ff-cal-nav" data-action="ff-prev-days" aria-label="往前' + stepLabel + '">‹</button><div class="ff-cal-range"><span>' + model.visibleDayCount + ' 日行程</span><strong>' + h(model.days[0].date + ' ～ ' + model.days[model.days.length - 1].date) + '</strong></div>' + todoButton + switcher + '<button type="button" class="ff-cal-nav" data-action="ff-next-days" aria-label="往後' + stepLabel + '">›</button></div>' +
       unplanned + '<div class="ff-cal-date-row"><span class="ff-cal-date-spacer"></span><div class="ff-cal-date-viewport"><div class="ff-cal-date-track">' + dates + '</div></div></div>' +
-      '<div class="ff-cal-scroll">' + renderTimeGutter() + '<div class="ff-cal-days-viewport"><div class="ff-cal-days">' + days + '</div></div>' + empty + '</div>' +
+      '<div class="ff-cal-scroll">' + renderTimeGutter() + '<div class="ff-cal-days-viewport"><div class="ff-cal-days">' + days + '</div></div>' + dawnStrip + empty + '</div>' +
       '<button type="button" class="ff-cal-fab" data-action="ff-add-source" aria-label="新增行程">＋</button>' +
     '</div>';
   }
@@ -692,7 +743,7 @@
     // 讀 inline 的 top（render 時就寫死了），不用 offsetTop——這支常在版面還沒排出來時跑，offsetTop 會全是 0。
     var tops = [].map.call(scroll.querySelectorAll('.ff-cal-card'), function (card) { return parseFloat(card.style.top) || 0; })
       .filter(function (top) { return top > 0; });
-    if (!tops.length) return 8.5 * pixelsPerHour;
+    if (!tops.length) return calPx(8.5 * pixelsPerHour);
     return Math.max(0, Math.min.apply(null, tops) - pixelsPerHour / 2);
   }
 
@@ -948,11 +999,14 @@
 
   // 待辦列＝左滑刪除（沿用 app-4-edit.js 的 initSwipeDelete；紅塊墊在底下，列本身平移）。
   function todoRowHtml(itemId, todo) {
+    // 整列原本是一顆 button＝文字不能編（Vivian 2026-08-20）。拆成「勾選鈕＋輸入框」，
+    // 勾選仍走 ff-detail-todo（既有測試與草稿邏輯不變），文字改成 input、跟備註一樣按儲存才寫入。
     return '<div class="ff-todo-swipe">' +
       '<button type="button" class="ff-todo-del" data-action="ff-todo-del" data-todo="' + h(todo.id) + '">刪除</button>' +
-      '<button type="button" class="ff-todo-row' + (todo.done ? ' done' : '') + '" data-action="ff-detail-todo" data-eid="' + h(itemId) + '" data-todo="' + h(todo.id) + '" aria-pressed="' + !!todo.done + '">' +
-      '<span class="ff-check" aria-hidden="true">' + (todo.done ? '✓' : '') + '</span>' +
-      '<span class="ff-detail-todo-text">' + h(todo.text) + '</span></button></div>';
+      '<div class="ff-todo-row' + (todo.done ? ' done' : '') + '">' +
+      '<button type="button" class="ff-todo-check" data-action="ff-detail-todo" data-eid="' + h(itemId) + '" data-todo="' + h(todo.id) + '" aria-pressed="' + !!todo.done + '" aria-label="切換完成">' +
+      '<span class="ff-check" aria-hidden="true">' + (todo.done ? '✓' : '') + '</span></button>' +
+      '<input class="ff-detail-todo-text" data-ff-todo-edit data-todo="' + h(todo.id) + '" maxlength="120" value="' + h(todo.text) + '"></div></div>';
   }
 
   function renderEditor() {
@@ -966,7 +1020,7 @@
     if (editor.confirmRipple) { renderRippleConfirm(); return; }
     var transaction = editor.transaction;
     var linkedDay = dayIdForDate(editor.date);
-    var coarseControls = '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-coarse' + (editor.coarseVisible ? ' checked' : '') + '><span><b>' + (editor.coarseVisible ? '粗流也顯示這項' : '只在細流') + '</b><small>' + (editor.coarseVisible ? '同一筆行程・' + h((dayMeta(linkedDay).label || linkedDay) + '・' + coarseSlotLabel(editor.coarseSlot)) : '適合交通、銜接與不需要出現在大方向的行程') + '</small></span></label>' +
+    var coarseControls = '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-coarse' + (editor.coarseVisible ? ' checked' : '') + '><span><b>粗流也顯示這項</b><small>' + (editor.coarseVisible ? '同一筆行程・' + h((dayMeta(linkedDay).label || linkedDay) + '・' + coarseSlotLabel(editor.coarseSlot)) : '沒勾＝只在細流，適合交通、銜接與不需要出現在大方向的行程') + '</small></span></label>' +
       '<div class="ff-coarse-fields"' + (editor.coarseVisible ? '' : ' hidden') + '><label class="ff-field"><span>粗流時段</span><select data-ff-coarse-slot>' + coarseSlotOptions(editor.coarseSlot) + '</select></label><p class="ff-link-note">日期會跟著上方日期；粗流與細流共用名稱、備註與待辦。</p></div></section>';
     // 名稱：有地點卡的行程改了會連地點卡一起改（她定的），所以不再標「來自別處」的說明字。
     var titleField = '<input class="ff-title-input" data-ff-title maxlength="80" placeholder="行程名稱" value="' + h(editor.title) + '">';
@@ -1014,7 +1068,25 @@
       '<button type="button" class="ff-grab" data-action="ff-grab" aria-label="拉高或收起這張卡"></button>' +
       '<div class="ff-sheet-scroll">' + hidden + titleField + timeBlock + hoursBlock + mapRow + placePriceRow(editor) + categorySection + noteSection + todoSection + advanced + deleteRow + notice + preview + '</div>' +
       '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || !editor.title.trim() ? ' disabled' : '') + '>儲存</button></div></div>';
-    openSheet(html, function () { renderEditor(); }, 'fineflow-editor');
+    openSheet(html, function () {
+      // 從這張卡跳去編輯地點卡再回來時，草稿裡的名稱／備註還是舊的，
+      // 使用者在這裡再按一次儲存就會把剛剛改的蓋回去（Vivian 2026-08-20：「編了完全不會存」的真正原因）。
+      // 只重讀「地點卡那幾欄」，時間、待辦等還沒存的草稿照舊留著。
+      if (state.editorReloadOnReturn) {
+        state.editorReloadOnReturn = false;
+        var freshPlace = state.editor && state.editor.placeId && typeof getPlace === 'function' ? getPlace(state.editor.placeId) : null;
+        if (freshPlace) {
+          state.editor.placeCard = copy(freshPlace);
+          state.editor.title = freshPlace.name;
+          state.editor.originalTitle = freshPlace.name;
+          state.editor.note = freshPlace.note || '';
+          state.editor.originalNote = freshPlace.note || '';
+          state.editor.placeNote = freshPlace.note || '';
+          state.editor.originalMapsUrl = freshPlace.mapsUrl || '';
+        }
+      }
+      renderEditor();
+    }, 'fineflow-editor');
     applyEditorSheetHeight();
   }
 
@@ -1315,7 +1387,7 @@
         editedItem.todos = (editedItem.todos || []).filter(function (todo) {
           if (wasThere[todo.id] && !draftById[todo.id]) return false;   // 在編輯卡裡被刪掉
           knownIds[todo.id] = true;
-          if (draftById[todo.id]) todo.done = !!draftById[todo.id].done;
+          if (draftById[todo.id]) { todo.done = !!draftById[todo.id].done; todo.text = draftById[todo.id].text; }
           return true;
         });
         (editor.todos || []).forEach(function (todo) { if (!knownIds[todo.id]) editedItem.todos.push(copy(todo)); });
@@ -1362,18 +1434,42 @@
     }
   }
 
+  // 未排項目（沒有 fine.startAt）：原本掛在細流頂端一整條 bar，2026-08-20 併進這個清單。
+  function unscheduledOccurrences() {
+    var version = activeVersion();
+    var api = calendarApi();
+    var dates = api.buildDateWindow ? api.buildDateWindow(calendarAnchor(), calendarVisibleDays()) : [calendarAnchor()];
+    var items = [];
+    dates.forEach(function (date) {
+      var dayId = dayIdForDate(date);
+      var parts = scheduleParts(buildSchedule(version, dayId), dayId, version);
+      (parts.unplanned || []).forEach(function (item) { items.push(item); });
+    });
+    return items;
+  }
+
   function openTodos(dayId) {
     var entries = [];
     activePlan().forEach(function (item) {
       if (dayId && fineDayId(item) !== dayId) return;
       (item.todos || []).forEach(function (todo) { entries.push({ item: item, todo: todo }); });
     });
-    var body = entries.length ? entries.map(function (entry) {
+    entries.sort(function (a, b) { return (a.todo.done ? 1 : 0) - (b.todo.done ? 1 : 0); });
+    var todoHead = '<h4 class="ff-todo-subhead">待辦（' + entries.filter(function (entry) { return !entry.todo.done; }).length + ' 項未完成）</h4>';
+    var body = todoHead + (entries.length ? entries.map(function (entry) {
       var meta = dayMeta(fineDayId(entry.item));
-      return '<button type="button" class="ff-todo-row' + (entry.todo.done ? ' done' : '') + '" data-action="ff-todo-toggle" data-eid="' + h(entry.item.id) + '" data-todo="' + h(entry.todo.id) + '" aria-pressed="' + entry.todo.done + '">' +
-        '<span class="ff-check">' + (entry.todo.done ? '✓' : '') + '</span><span><b>' + h(entry.todo.text) + '</b><small>' + h(meta.label + '・' + (timeFromIso(entry.item.fine && entry.item.fine.startAt) || '未排時間') + '・' + occurrenceTitle(entry.item)) + '</small></span></button>';
-    }).join('') : '<div class="ff-sheet-empty">目前沒有待辦</div>';
-    openSheet('<div class="ff-sheet ff-todo-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-todo-title"><div class="ff-sheet-head"><span class="ff-kicker">集中清單</span><h3 id="ff-todo-title">' + (dayId ? h(dayMeta(dayId).label + ' 待辦') : '全部待辦') + '</h3><p>待辦會跟著行程本體一起移動。</p></div><div class="ff-sheet-scroll">' + body + '</div></div>', function () { openTodos(dayId); }, 'fineflow-todos');
+      return '<div class="ff-todo-line">' +
+        '<button type="button" class="ff-todo-row' + (entry.todo.done ? ' done' : '') + '" data-action="ff-todo-toggle" data-eid="' + h(entry.item.id) + '" data-todo="' + h(entry.todo.id) + '" aria-pressed="' + entry.todo.done + '">' +
+        '<span class="ff-check">' + (entry.todo.done ? '✓' : '') + '</span><span><b>' + h(entry.todo.text) + '</b><small>' + h(meta.label + '・' + (timeFromIso(entry.item.fine && entry.item.fine.startAt) || '未排時間') + '・' + occurrenceTitle(entry.item)) + '</small></span></button>' +
+        '<button type="button" class="ff-todo-edit-btn" data-action="ff-unscheduled-edit" data-eid="' + h(entry.item.id) + '" aria-label="編輯這筆行程">✎</button>' +
+        '</div>';
+    }).join('') : '<div class="ff-sheet-empty">目前沒有待辦</div>');
+    var pending = unscheduledOccurrences();
+    var pendingRows = pending.length ? pending.map(function (item) {
+      return '<button type="button" class="ff-source-place-row" data-action="ff-unscheduled-edit" data-eid="' + h(item.id) + '"><b>' + h(occurrenceTitle(item)) + '</b><small>設定日期與時間</small></button>';
+    }).join('') : '';
+    var pendingSection = pendingRows ? '<h4 class="ff-todo-subhead">尚未排時間（' + pending.length + '）</h4>' + pendingRows : '';
+    openSheet('<div class="ff-sheet ff-todo-sheet" role="dialog" aria-modal="true" aria-labelledby="ff-todo-title"><div class="ff-sheet-head"><span class="ff-kicker">集中清單</span><h3 id="ff-todo-title">' + (dayId ? h(dayMeta(dayId).label + ' 待辦') : '待辦・尚未排時間') + '</h3><p>待辦會跟著行程本體一起移動；改文字請按 ✎ 進編輯卡。</p></div><div class="ff-sheet-scroll">' + body + pendingSection + '</div></div>', function () { openTodos(dayId); }, 'fineflow-todos');
   }
 
   function openCustom(dayId) {
@@ -1481,7 +1577,7 @@
     var scroll = document.querySelector('#' + rootId + ' .ff-cal-scroll');
     if (!scroll) return;
     var minute = +draft.start.slice(0, 2) * 60 + +draft.start.slice(3);
-    var target = minute * calendarPixelsPerHour() / 60 - 145;
+    var target = calPx(minute * calendarPixelsPerHour() / 60) - 145;
     var maximum = scroll.scrollHeight - scroll.clientHeight;
     scroll.scrollTop = Math.max(0, maximum > 0 ? Math.min(maximum, target) : target);
   }
@@ -1523,7 +1619,7 @@
     if (typeof draft.coarseVisible !== 'boolean') draft.coarseVisible = false;
     draft.coarseDay = draft.coarseDay || suggested.day;
     draft.coarseSlot = draft.coarseSlot || suggested.slot;
-    return '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-create-coarse' + (draft.coarseVisible ? ' checked' : '') + '><span><b>' + (draft.coarseVisible ? '粗流也顯示這項' : '只在細流') + '</b><small>' + (draft.coarseVisible ? '同一筆行程，日期跟著上方日期' : '交通與銜接行程通常不必放進粗流') + '</small></span></label><div class="ff-coarse-fields"' + (draft.coarseVisible ? '' : ' hidden') + '><label class="ff-field"><span>粗流時段</span><select data-ff-create-coarse-slot>' + coarseSlotOptions(draft.coarseSlot) + '</select></label></div></section>';
+    return '<section class="ff-coarse-control"><label class="ff-fixed-check"><input type="checkbox" data-ff-create-coarse' + (draft.coarseVisible ? ' checked' : '') + '><span><b>粗流也顯示這項</b><small>' + (draft.coarseVisible ? '同一筆行程，日期跟著上方日期' : '沒勾＝只在細流，交通與銜接行程通常不必放進粗流') + '</small></span></label><div class="ff-coarse-fields"' + (draft.coarseVisible ? '' : ' hidden') + '><label class="ff-field"><span>粗流時段</span><select data-ff-create-coarse-slot>' + coarseSlotOptions(draft.coarseSlot) + '</select></label></div></section>';
   }
 
   function ensureCreateTimingDraft(title) {
@@ -1748,22 +1844,6 @@
     openEditor(itemId);
   }
 
-  function openUnscheduled() {
-    var version = activeVersion();
-    var api = calendarApi();
-    var dates = api.buildDateWindow ? api.buildDateWindow(calendarAnchor(), calendarVisibleDays()) : [calendarAnchor()];
-    var items = [];
-    dates.forEach(function (date) {
-      var dayId = dayIdForDate(date);
-      var parts = scheduleParts(buildSchedule(version, dayId), dayId, version);
-      (parts.unplanned || []).forEach(function (item) { items.push(item); });
-    });
-    var rows = items.map(function (item) {
-      return '<button type="button" class="ff-source-place-row" data-action="ff-unscheduled-edit" data-eid="' + h(item.id) + '"><b>' + h(occurrenceTitle(item)) + '</b><small>設定日期與時間</small></button>';
-    }).join('');
-    openSheet('<div class="ff-sheet ff-unscheduled-sheet" role="dialog" aria-modal="true"><div class="ff-sheet-head"><span class="ff-kicker">細流</span><h3>尚未排時間</h3></div><div class="ff-sheet-scroll">' + (rows || '<div class="ff-sheet-empty">目前沒有未排項目</div>') + '</div></div>', function () { openUnscheduled(); }, 'fineflow-unscheduled');
-  }
-
   function openImportPreview(payload) {
     var api = window.CNXFineFlowImport;
     if (!api || typeof api.dryRunImport !== 'function') throw new Error('細流匯入模組尚未載入');
@@ -1919,7 +1999,6 @@
     if (action === 'ff-detail-todo') { toggleOccurrenceTodo(target.dataset.eid, target.dataset.todo, true); return; }
     if (action === 'ff-detail-todo-add') { addOccurrenceTodo(target.dataset.eid); return; }
     if (action === 'ff-detail-edit') { openEditor(target.dataset.eid); return; }
-    if (action === 'ff-unscheduled') { openUnscheduled(); return; }
     if (action === 'ff-unscheduled-edit') { openEditor(target.dataset.eid); return; }
     if (action === 'ff-import-apply') { applyImportPreview(); return; }
     if (action === 'ff-create-coarse-suggest' && state.createDraft) {
@@ -2012,6 +2091,7 @@
     if (action === 'ff-add') { openCustom(target.dataset.day || null); return; }
     if (action === 'ff-add-save') { saveCustom(); return; }
     if (action === 'ff-todos') { openTodos(target.dataset.day || null); return; }
+    if (action === 'ff-dawn-toggle') { state.dawnOpen = !state.dawnOpen; renderFineFlow(); return; }
     if (action === 'ff-todo-add' && state.editor) {
       var todoInput = sh.querySelector('[data-ff-todo-text]');
       var todoText = todoInput && todoInput.value.trim(), todoItem = findOccurrence(state.editor.id);
@@ -2052,7 +2132,7 @@
       copyText(url);
       return;
     }
-    if (action === 'ff-open-place' && typeof openEdit === 'function') { openEdit(target.dataset.pid); return; }
+    if (action === 'ff-open-place' && typeof openEdit === 'function') { state.editorReloadOnReturn = true; openEdit(target.dataset.pid); return; }
     if (action === 'ff-set-date' && state.editor) {
       var pickedDate = target.dataset.date;
       if (target.dataset.which === 'start') {
@@ -2140,11 +2220,12 @@
     if (range && days[index]) range.textContent = days[index].dataset.date + ' ～ ' + days[Math.min(days.length - 1, index + visibleCount - 1)].dataset.date;
     var visibleDays = days.slice(index, index + visibleCount);
     var unscheduledCount = visibleDays.reduce(function (total, day) { return total + (+day.dataset.unscheduledCount || 0); }, 0);
-    var unscheduled = calendar.querySelector('.ff-cal-unscheduled');
-    if (unscheduled) {
-      unscheduled.hidden = !unscheduledCount;
-      var unscheduledBadge = unscheduled.querySelector('b');
-      if (unscheduledBadge) unscheduledBadge.textContent = '□ ' + unscheduledCount;
+    var todoBadge = calendar.querySelector('.ff-cal-todo-btn b');
+    if (todoBadge) {
+      var openTodos = activePlan().reduce(function (total, item) {
+        return total + (item.todos || []).filter(function (todo) { return todo && todo.done !== true; }).length;
+      }, 0);
+      todoBadge.textContent = String(openTodos + unscheduledCount);
     }
     var empty = calendar.querySelector('.ff-cal-empty');
     if (empty) empty.hidden = visibleDays.some(function (day) { return (+day.dataset.cardCount || 0) > 0; });
@@ -2218,7 +2299,7 @@
     return minute >= 1440 ? zonedIso(addDays(dateText, 1), '00:00') : zonedIso(dateText, labelForMinute(minute));
   }
   function minuteAtPointer(clientY, scrollTop, scrollRectTop) {
-    return snapPointerMinute((clientY - scrollRectTop + scrollTop) * 60 / calendarPixelsPerHour());
+    return snapPointerMinute(calPxInverse(clientY - scrollRectTop + scrollTop) * 60 / calendarPixelsPerHour());
   }
   function calendarColumnAt(clientX, left, width, count) {
     count = count || 3;
@@ -2423,8 +2504,8 @@
     var ghost = ensurePointerGhost(draft, targetDay || draft.sourceDay);
     ghost.classList.toggle('is-invalid', !draft.preview.valid);
     var pixelsPerHour = calendarPixelsPerHour();
-    var offset = interval.start * pixelsPerHour / 60;
-    var height = Math.max(16, (interval.end - interval.start) * pixelsPerHour / 60);
+    var offset = calPx(interval.start * pixelsPerHour / 60);
+    var height = Math.max(16, calPx(interval.end * pixelsPerHour / 60) - offset);
     if (draft.ghostOffset !== offset) { ghost.style.transform = 'translateY(' + offset + 'px)'; draft.ghostOffset = offset; }
     if (draft.ghostHeight !== height) { ghost.style.height = height + 'px'; draft.ghostHeight = height; }
     var timeText = draft.preview.valid ? labelForMinute(interval.start) + '–' + labelForMinute(interval.end) : '不能放在這裡';
@@ -2879,6 +2960,10 @@
       return;
     } else if (event.target.matches('[data-ff-notes]')) {
       state.editor.note = event.target.value;
+      return;
+    } else if (event.target.matches('[data-ff-todo-edit]')) {
+      var editedTodo = (state.editor.todos || []).find(function (todo) { return todo.id === event.target.dataset.todo; });
+      if (editedTodo) editedTodo.text = event.target.value;
       return;
     } else if (event.target.matches('[data-ff-place-maps]')) {
       if (state.editor.placeCard) state.editor.placeCard.mapsUrl = event.target.value;
