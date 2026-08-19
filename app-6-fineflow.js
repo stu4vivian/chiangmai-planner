@@ -634,7 +634,9 @@
         continue;
       }
       var time = String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0');
-      html += '<button type="button" class="ff-cal-slot" data-action="ff-create-at" data-day="' + h(day.dayId) + '" data-date="' + h(day.date) + '" data-time="' + time + '" style="--ff-minute:' + minute + '" aria-label="' + h(day.date + ' ' + time + ' 新增行程') + '"></button>';
+      // 整點線＝「XX:30 這格的下緣」。原本靠 :nth-child(even) 分辨，凌晨收合插進一個 gap 之後
+      // 奇偶就整排錯位，整點線會畫到半點上。改成 render 時直接標記，不受 DOM 結構影響。
+      html += '<button type="button" class="ff-cal-slot' + (minute % 60 === 30 ? ' is-hour-end' : '') + '" data-action="ff-create-at" data-day="' + h(day.dayId) + '" data-date="' + h(day.date) + '" data-time="' + time + '" style="--ff-minute:' + minute + '" aria-label="' + h(day.date + ' ' + time + ' 新增行程') + '"></button>';
     }
     return html;
   }
@@ -1012,6 +1014,10 @@
   }
 
   function renderEditor() {
+    // 重繪＝整段換 innerHTML。輸入框的值若還沒回寫進 state（iOS 貼上／自動填入常常不發 input 事件），
+    // 這一次重繪就會把它洗掉，使用者再按儲存也存不到（Vivian 2026-08-20 連兩輪回報 Maps 連結存不進去）。
+    // 所以每次重繪前先把畫面上的值收回來；畫面不是編輯卡時（確認框等）會自動略過。
+    syncEditorFromDom();
     var editor = state.editor, item = editor && findOccurrence(editor.id);
     if (!editor || !item || typeof sh === 'undefined') return;
     if (editor.pointerCompact) { renderPointerDecision(); return; }
@@ -1283,6 +1289,7 @@
   function syncEditorFromDom() {
     var editor = state.editor;
     if (!editor || typeof sh === 'undefined' || !sh) return;
+    if (!sh.querySelector('.ff-editor-sheet')) return;   // 畫面現在不是編輯卡（確認框等）就別亂讀
     var titleEl = sh.querySelector('[data-ff-title]');
     if (titleEl) { editor.title = titleEl.value; if (editor.placeCard) editor.placeCard.name = titleEl.value; }
     var noteEl = sh.querySelector('[data-ff-notes]');
@@ -3001,6 +3008,17 @@
     event.stopPropagation();
     state.editor.confirmDiscard = changes;
     renderEditor();
+  }, true);
+
+  // input 事件不是每種輸入方式都會發（iOS 貼上、自動填入、第三方鍵盤）。change／blur 是最後一道保險：
+  // 值真的變了、或焦點離開了，就把整張卡的欄位一起收回 state，不必逐欄比對。
+  document.addEventListener('change', function (event) {
+    if (!state.editor || !event.target || !event.target.closest) return;
+    if (event.target.closest('.ff-editor-sheet')) syncEditorFromDom();
+  }, true);
+  document.addEventListener('blur', function (event) {
+    if (!state.editor || !event.target || !event.target.closest) return;
+    if (event.target.closest('.ff-editor-sheet')) syncEditorFromDom();
   }, true);
 
   document.addEventListener('input', function (event) {

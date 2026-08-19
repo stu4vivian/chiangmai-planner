@@ -1182,7 +1182,7 @@
     background:transparent;
     cursor:pointer;
   }
-  .ff-cal-slot:nth-child(even){border-bottom-color:#e7e7e9;}
+  .ff-cal-slot.is-hour-end{border-bottom-color:#cfd0d5;}
   .ff-cal-slot:active{background:rgba(88,152,240,.08);}
   /* 退出解鎖態的那一下 click 已被吃掉，格子就不該閃——閃了會讓人以為真的點到（Vivian）。 */
   body.ff-disarming .ff-cal-slot:active,body.ff-disarming .ff-cal-card-main:active{background:none;}
@@ -1247,7 +1247,7 @@
      待辦要跟它搶空間，不用另外留白也不會疊字——比原本放右下角要留一塊保留空間的做法乾淨（Vivian 2026-08-19）。 */
   .ff-cal-card-map-link{position:absolute;right:3px;top:3px;z-index:3;min-width:15px;min-height:15px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;background:rgba(255,255,255,.85);color:inherit;font-size:8px;line-height:1;text-decoration:none;}
   .ff-cal-card-map-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
-  .ff-cal-card.density-small .ff-cal-card-map-link{display:none;}
+  .ff-cal-card.density-small .ff-cal-card-map-link{right:2px;top:2px;min-width:12px;min-height:12px;border-radius:3px;font-size:7px;}
   .ff-cal-card-todo-summary{
     flex:none;
     min-width:0;
@@ -1271,10 +1271,9 @@
   .ff-cal-check{width:13px;height:13px;border:1px solid currentColor;border-radius:4px;background:rgba(255,255,255,.55);opacity:.9;}
   /* 矮卡（≤30 分）只留店名，時間靠它在時間軸上的位置讀（Google Calendar 也是這樣）。
      試過把時間擠進同一行，量出來 95px 的卡剩 60px 給店名＝「前往週六夜市」被切成「前往週六…」，不划算。 */
-  .ff-cal-card.density-small .ff-cal-card-main{display:block;padding:2px 4px 1px;}
+  .ff-cal-card.density-small .ff-cal-card-main{display:block;padding:2px 16px 1px 4px;}
   .ff-cal-card.density-small .ff-cal-card-time{display:none;}
   .ff-cal-card.density-small .ff-cal-card-note{display:none;}
-  .ff-cal-card.density-small .ff-cal-card-map-link{display:none;}
   .ff-cal-card.density-small .ff-cal-card-title{min-width:0;display:block;margin:0;overflow:hidden;font-size:12px;line-height:1.2;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal;}
   .ff-cal-card.density-medium .ff-cal-card-title{-webkit-line-clamp:2;}   /* 48px 的卡放得下兩行標題＋時間，只給一行是白白留 24px 空著、店名還被切 */
   .ff-cal-card.density-medium .ff-cal-card-note{-webkit-line-clamp:2;}
