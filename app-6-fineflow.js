@@ -1046,8 +1046,14 @@
       '<label class="ff-field"><span>Google Maps 連結</span><input type="url" inputmode="url" data-ff-place-maps value="' + h(editor.placeCard ? editor.placeCard.mapsUrl || '' : editor.customMapsUrl) + '" placeholder="https://maps.google.com/…"></label>' +
       '</section>';
     // 類別只有自訂行程能改：掛地點卡的類別跟著卡片庫走，改地點卡才對（避免兩處各存一份互相打架）。
+    // 有些自訂行程（遷移進來的交通）帶著不在她類別清單裡的 key，例如「交通」。
+    // 下拉沒有對應選項時瀏覽器會自動選第一個＝「食物」，使用者只是想改備註、按一次儲存，
+    // 類別就被靜靜改掉（Vivian 2026-08-20 的資料裡有 11 筆是這種）。找不到就補一個「目前」選項頂上。
+    var categoryOptions = categoriesList();
+    var categoryKnown = categoryOptions.some(function (c) { return c.key === editor.category; });
     var categorySection = editor.placeId ? '' : '<section class="ff-editor-section"><label class="ff-field"><span>類別</span><select data-ff-category>' +
-      categoriesList().map(function (c) { return '<option value="' + h(c.key) + '"' + (c.key === editor.category ? ' selected' : '') + '>' + h(c.icon) + ' ' + h(c.label) + '</option>'; }).join('') +
+      (!categoryKnown && editor.category ? '<option value="' + h(editor.category) + '" selected>' + h(editor.category) + '（目前）</option>' : '') +
+      categoryOptions.map(function (c) { return '<option value="' + h(c.key) + '"' + (c.key === editor.category ? ' selected' : '') + '>' + h(c.icon) + ' ' + h(c.label) + '</option>'; }).join('') +
       '</select></label></section>';
     // 待辦是草稿：勾選與新增都只改 state，按儲存才寫進資料（她 2026-08-16 定案）。
     var todos = (editor.todos || []).map(function (todo) { return todoRowHtml(item.id, todo); }).join('');
@@ -2978,8 +2984,14 @@
   // 未存就想離開（✕／取消／點背景）＝先問。沒改過任何東西就直接放行，不囉嗦。
   document.addEventListener('click', function (event) {
     if (!state.editor || state.editor.confirmDiscard || state.editor.confirmDelete || state.editor.confirmTodoDelete || state.editor.confirmRipple || state.editor.pointerCompact) return;
+    // 註解寫「✕／取消／點背景」，但條件是 closer.closest('.ff-editor-sheet')——
+    // 右上角那顆 ✕ 是 openSheet 加在 .ff-editor-sheet 外面的，永遠比對不到，
+    // 等於按 ✕ 一路直接關掉、改動靜靜消失（Vivian 2026-08-20）。改成看「現在開著的是不是編輯卡」。
+    // 點背景那條走 overlay，不經過 [data-action="close"]，另外在下面補。
     var closer = event.target && event.target.closest && event.target.closest('[data-action="close"]');
-    if (!closer || !closer.closest('.ff-editor-sheet')) return;
+    var editorOpen = typeof sh !== 'undefined' && sh && sh.querySelector('.ff-editor-sheet');
+    var backdrop = typeof ov !== 'undefined' && event.target === ov && editorOpen;
+    if ((!closer || !editorOpen) && !backdrop) return;
     syncEditorFromDom();   // 沒發 input 事件的改動也算「未存」，不然關掉就靜靜丟掉
     var changes = editorPendingChanges(state.editor);
     if (!changes.length) return;
