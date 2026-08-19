@@ -33,6 +33,7 @@
     var getLocalDb = opts.getLocalDb;      // () => 目前整包 blob
     var applyDb = opts.applyDb;            // (db) => 設全域 + renderAll
     var onStatus = opts.onStatus || function () {};
+    var onSaveResult = opts.onSaveResult || function () {};   // 診斷用：每次上傳的結果（成功／衝突／失敗）
     var mergeDb = opts.mergeDb;            // CNXCore.mergeDb
     var getSyncedVersion = opts.getSyncedVersion, setSyncedVersion = opts.setSyncedVersion;   // 以下三份同步狀態都必須由呼叫端以 tripId 隔離
     var getSyncedDb = opts.getSyncedDb, setSyncedDb = opts.setSyncedDb;
@@ -96,17 +97,18 @@
       saving = true;
       var local = clone(getLocalDb());                              // 凍結這一刻的本機狀態當「mine」
       return client.saveTrip(tripId, local, syncedVersion).then(function (v) {
-        if (v !== -1) { finishSave(local, v); return; }
+        if (v !== -1) { onSaveResult('ok', '成功 v' + v); finishSave(local, v); return; }
+        onSaveResult('conflict', '版本衝突，合併重試');
         return client.getTrip(tripId).then(function (row) {            // 衝突 → 拉遠端、合併、重試一次
           var merged = mergeDb(synced, clone(getLocalDb()), row.data); // 連第一次 request 送出後的新編輯也一起合併
           applyDb(merged);
           var mergedLocal = clone(getLocalDb());                       // 套用後快照（同 load 的紀律），衝突後 poll 才不會誤判 dirty
           return client.saveTrip(tripId, mergedLocal, row.version).then(function (v2) {
-            if (v2 !== -1) finishSave(mergedLocal, v2);
-            else { saving = false; setSnapshot(row.data); setVer(row.version); setDirty(true); scheduleSave(); } // 仍衝突 → 稍後再合併
+            if (v2 !== -1) { onSaveResult('ok', '合併後成功 v' + v2); finishSave(mergedLocal, v2); }
+            else { onSaveResult('conflict', '合併後仍衝突'); saving = false; setSnapshot(row.data); setVer(row.version); setDirty(true); scheduleSave(); } // 仍衝突 → 稍後再合併
           });
         });
-      }).catch(function () { saving = false; setDirty(true); onStatus('offline'); });
+      }).catch(function (err) { onSaveResult('fail', '失敗：' + ((err && err.message) || err)); saving = false; setDirty(true); onStatus('offline'); });
     }
 
     function scheduleSave() {
@@ -114,6 +116,7 @@
       if (synced && same(local, synced) && !saving) {
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
         setDirty(false);
+        onSaveResult('skip', '本機與雲端相同，未送出');
         return;
       } // 普通開頁／尚未送出就復原：取消 debounce，不可讓雲端空增版本
       setDirty(true);                                                // debounce 前先持久化，reload 才知道這是同旅程的真編輯

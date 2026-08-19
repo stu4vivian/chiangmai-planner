@@ -141,6 +141,14 @@ function restoreTab(){   // boot：還原上次分頁（lib/budget）；flow 為
   if(t==='lib'||t==='budget'||t==='fineflow') switchTab(t);
 }
 let lastSync='—';
+let lastSyncDetail='—';                                  // 最後一次上傳的結果（成功／衝突／失敗＋時間），給診斷用
+function syncDiagText(){
+  const id=localStorage.getItem(TRIPKEY)||'';
+  if(!id) return '尚未連上雲端';
+  const svKey=(V2_ENV?'cnx-sv-v2:':'cnx-sv:')+id, dirtyKey=(V2_ENV?'cnx-dirty-v2:':'cnx-dirty:')+id;
+  const sv=localStorage.getItem(svKey), dirty=localStorage.getItem(dirtyKey)==='1';
+  return '旅程 …'+id.slice(-6)+'｜本機記到的雲端版本 '+(sv==null?'（無）':sv)+'｜待送 '+(dirty?'有':'無')+'｜上傳 '+lastSyncDetail;
+}
 function syncStatusText(s){ return s==='synced'?'已同步':s==='syncing'?'同步中…':s==='offline'?'離線（已存本機）':'—'; }
 function setSyncStatus(s){ lastSync=s; const el=document.getElementById('syncStatus'); if(el) el.textContent=syncStatusText(s); }
 function syncLink(){ const id=localStorage.getItem(TRIPKEY); return id?location.origin+location.pathname+'#t='+id:''; }
@@ -148,6 +156,7 @@ function copySyncLink(){ const l=syncLink(); if(!l){ toast('尚未連上雲端')
 function openSettings(){   // 版B Hub 清單（Vivian 2026-06-22）：分區扁平髮絲線列、每列點進專屬編輯頁（拿掉「管理分類設定」中間層）；登記 navStack 父層→子窗關閉回設定
   const tiers=['t1','t2','t3','t4'].map(k=>`<i style="background:${esc(((TRIP.tierColors||{})[k]||{}).fg||'#999')}"></i>`).join('');
   const sync = SYNC_URL ? `<div class="seclabel">共編</div><div class="sd">🔗 把連結傳給旅伴即可一起編輯。狀態：<span id="syncStatus">${syncStatusText(lastSync)}</span></div>
+    <div class="sd syncdiag" id="syncDiag">${esc(syncDiagText())}</div>
     <div class="setrow" data-action="copy-link"><span class="e">📋</span><span class="n">複製同步連結</span></div>` : '';
   let h=`<h3>⚙ 設定</h3><div class="sd">資料與外觀</div>
     <div class="seclabel">行程</div>
@@ -285,6 +294,12 @@ async function initSync(){
     }
     syncCtl = CNXSync.createSyncController({
       client, tripId, getLocalDb, applyDb, mergeDb:CNXCore.mergeDb, onStatus:setSyncStatus,
+      onSaveResult:function(kind,detail){
+        const t=new Date();
+        const pad=n=>(n<10?'0':'')+n;
+        lastSyncDetail=detail+'（'+pad(t.getHours())+':'+pad(t.getMinutes())+':'+pad(t.getSeconds())+'）';
+        const el=document.getElementById('syncDiag'); if(el) el.textContent=syncDiagText();
+      },
       getSyncedVersion:function(){ const r=localStorage.getItem(svKey); return r==null?-1:(+r); },
       setSyncedVersion:function(v){ localStorage.setItem(svKey, String(v)); },
       getSyncedDb:function(){ try{ const r=localStorage.getItem(sbKey); return r?JSON.parse(r):null; }catch(_){ return null; } },
