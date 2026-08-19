@@ -1235,14 +1235,18 @@
     text-align:left;
     cursor:pointer;
   }
-  .ff-cal-card-title{display:-webkit-box;min-width:0;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:11px;line-height:1.2;font-weight:750;overflow-wrap:anywhere;}
+  .ff-cal-card-title{display:-webkit-box;min-width:0;padding-right:14px;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:12px;line-height:1.15;font-weight:750;overflow-wrap:anywhere;}   /* 右邊留給角落的 Maps 圖示（15px 寬＋3px 位移），字才不會被蓋到 */
   .ff-cal-type-icon{margin-right:3px;font-size:.9em;font-weight:500;}
-  .ff-cal-card-time{margin-top:1px;font-size:9px;line-height:1.2;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.78;}
-  .ff-cal-card-note{display:-webkit-box;min-width:0;min-height:0;margin-top:3px;overflow:hidden;font-size:9px;line-height:1.35;font-weight:560;white-space:normal;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:3;opacity:.92;}
-  .ff-cal-card-map-link{position:absolute;right:4px;bottom:4px;z-index:3;min-width:24px;min-height:24px;display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;border-radius:7px;background:rgba(255,255,255,.9);color:inherit;font-size:12px;line-height:1;text-decoration:none;box-shadow:0 1px 4px rgba(20,20,35,.12);}
+  /* time／note／todo 標籤上是 <span>，預設 display:inline——margin 對 inline 元素的上下方向不生效，
+     真正的間距其實是「inline 內容另起一行」時瀏覽器算的行框高度，跟這裡設的 margin 完全對不上（Vivian：標題跟時間看起來還是很遠）。
+     一律轉 block，margin-top 才會是唯一、可預期的間距來源。 */
+  .ff-cal-card-time{display:block;margin-top:2px;font-size:10px;line-height:1.1;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.78;}
+  .ff-cal-card-note{display:-webkit-box;min-width:0;min-height:0;margin-top:2px;overflow:hidden;font-size:10px;line-height:1.25;font-weight:560;white-space:normal;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:3;opacity:.92;}
+  /* 放右上角、article 級（main 外面，不會吃 main 的點擊委派）：上面通常只有標題，不像下面永遠有備註/
+     待辦要跟它搶空間，不用另外留白也不會疊字——比原本放右下角要留一塊保留空間的做法乾淨（Vivian 2026-08-19）。 */
+  .ff-cal-card-map-link{position:absolute;right:3px;top:3px;z-index:3;min-width:15px;min-height:15px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;background:rgba(255,255,255,.85);color:inherit;font-size:8px;line-height:1;text-decoration:none;}
   .ff-cal-card-map-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
-  .ff-cal-card-flags{position:absolute;right:3px;top:3px;min-width:0;display:flex;align-items:center;gap:3px;overflow:hidden;font-size:8px;line-height:1;white-space:nowrap;}
-  .ff-cal-progress,.ff-cal-meta-icon{flex:none;font-size:8px;font-weight:750;opacity:.8;}
+  .ff-cal-card.density-small .ff-cal-card-map-link{display:none;}
   .ff-cal-card-todo-summary{
     flex:none;
     min-width:0;
@@ -1251,13 +1255,13 @@
     grid-template-columns:14px minmax(0,1fr);
     align-items:center;
     gap:3px;
-    margin-top:3px;
+    margin-top:2px;
     padding:0;
     border:0;
     background:transparent;
     color:inherit;
     font-family:inherit;
-    font-size:9px;
+    font-size:10px;
     font-weight:650;
     text-align:left;
     pointer-events:none;
@@ -1270,14 +1274,11 @@
   .ff-cal-card.density-small .ff-cal-card-time{display:none;}
   .ff-cal-card.density-small .ff-cal-card-note{display:none;}
   .ff-cal-card.density-small .ff-cal-card-map-link{display:none;}
-  .ff-cal-card.density-small .ff-cal-card-title{min-width:0;display:block;margin:0;overflow:hidden;font-size:11px;line-height:1.2;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal;}
-  .ff-cal-card.density-small .ff-cal-card-flags{position:absolute;right:2px;top:2px;margin:0;}
-  .ff-cal-card.density-small .ff-cal-card-flags>*{display:none;}
+  .ff-cal-card.density-small .ff-cal-card-title{min-width:0;display:block;margin:0;overflow:hidden;font-size:12px;line-height:1.2;white-space:nowrap;text-overflow:ellipsis;overflow-wrap:normal;}
   .ff-cal-card.density-medium .ff-cal-card-title{-webkit-line-clamp:2;}   /* 48px 的卡放得下兩行標題＋時間，只給一行是白白留 24px 空著、店名還被切 */
   .ff-cal-card.density-medium .ff-cal-card-note{-webkit-line-clamp:2;}
   .ff-cal-card.density-medium .ff-cal-card-todo-summary{display:none;}
   .ff-cal-card.density-large .ff-cal-card-note{-webkit-line-clamp:3;}
-  .ff-cal-card.density-large .ff-cal-card-flags{flex-wrap:wrap;overflow:visible;}
   /* 有並排（同時段兩張以上）＝寬度被砍半，塞三種資訊只會三種都被切。只留店名，時間靠時間軸位置讀。 */
   .ff-cal-card.is-crowded .ff-cal-card-time,
   .ff-cal-card.is-crowded .ff-cal-card-note,
@@ -1288,7 +1289,7 @@
   .ff-cal-card.is-crowded.density-small .ff-cal-card-main{display:block;}
   .ff-cal-card.is-crowded.density-small .ff-cal-card-title{white-space:normal;overflow-wrap:anywhere;}
   .ff-cal-card.is-hours-warning{outline:2px solid #c84a4a;outline-offset:-1px;box-shadow:0 2px 6px rgba(181,69,69,.18);}
-  .ff-cal-card-hours{display:block;color:var(--danger);font-size:10px;font-weight:800;line-height:1.25;overflow-wrap:anywhere;}
+  .ff-cal-card-hours{display:block;margin-top:2px;color:var(--danger);font-size:10px;font-weight:800;line-height:1.25;overflow-wrap:anywhere;}   /* 跟時間/備註同一套字級節奏，不要自己一格獨立值（Vivian：卡片上所有文字要盤點齊全、統一規則） */
   .ff-cal-card.is-selected{z-index:12;outline:2px solid var(--ink);outline-offset:1px;box-shadow:0 5px 14px rgba(20,20,35,.2);}
   .ff-cal-card.is-hours-warning.is-selected{box-shadow:inset 0 0 0 2px #c84a4a,0 5px 14px rgba(20,20,35,.2);}
   .ff-cal-card.is-preview{z-index:11;border-style:dashed;opacity:.82;box-shadow:0 5px 16px rgba(20,20,35,.14);}
@@ -1502,8 +1503,11 @@
     .ff-calendar{--ff-cal-gutter:63px;}
     .ff-cal-toolbar strong{font-size:11px;}
     .ff-cal-date b{font-size:12px;}
-    .ff-cal-card-title{font-size:11px;}
-    .ff-cal-card-time{font-size:9px;}
+    .ff-cal-card-title{font-size:12px;}
+    .ff-cal-card-time{margin-top:2px;font-size:10px;}
+    .ff-cal-card-note{margin-top:2px;font-size:10px;}
+    .ff-cal-card-todo-summary{margin-top:2px;font-size:10px;}
+    .ff-cal-card-hours{margin-top:2px;font-size:10px;}
     .ff-cal-fab{right:14px;bottom:14px;}
     .sheet:has(.ff-sheet){max-height:min(78dvh,660px);}
     .ff-sheet{max-height:min(78dvh,660px);}
@@ -1520,10 +1524,11 @@
     .ff-cal-toolbar>.ff-cal-range{padding-left:0;text-align:center;}
     .ff-cal-time{padding-right:8px;font-size:9px;}
     .ff-cal-card-main{padding:4px 5px 3px 6px;}
-    .ff-cal-card-time{font-size:9px;}
-    .ff-cal-card-title{font-size:11px;}
-    .ff-cal-card-flags,.ff-cal-progress,.ff-cal-meta-icon{font-size:9px;}
-    .ff-cal-card-todo-summary{font-size:9.5px;}
+    .ff-cal-card-time{margin-top:4px;font-size:12px;}
+    .ff-cal-card-title{font-size:13px;}
+    .ff-cal-card-note{margin-top:4px;font-size:12px;}
+    .ff-cal-card-todo-summary{margin-top:4px;font-size:12px;}
+    .ff-cal-card-hours{margin-top:4px;font-size:12px;}
     .ff-cal-date-viewport,.ff-cal-days-viewport{overflow-x:hidden;scroll-snap-type:none;touch-action:pan-y;}
     /* 手機維持 pan-y＝平常上下捲照常；長按進拖之後靠 JS 的 touchmove preventDefault 鎖捲，
        不要指望這裡改 touch-action（見上方註解）。 */

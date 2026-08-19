@@ -629,14 +629,17 @@
     if (armed) classes.push('is-armed');
     var left = 1.5 + card.leftPercent * 0.92;
     var width = card.widthPercent * 0.92;
-    return '<article class="' + classes.join(' ') + '" data-eid="' + h(card.id) + '" style="--ff-top:' + card.top + 'px;--ff-height:' + card.height + 'px;--ff-left:' + left + '%;--ff-width:' + width + '%;--ff-card-bg:' + h(card.palette.background) + ';--ff-card-border:' + h(card.palette.border) + ';--ff-card-text:' + h(card.palette.text) + ';top:' + card.top + 'px;height:' + card.height + 'px;left:' + left + '%;width:' + width + '%;background:' + h(card.palette.background) + ';border-color:' + h(card.palette.border) + ';color:' + h(card.palette.text) + '">' +
+    // 卡片上下各縮 1px：時段前後緊接的行程原本高度剛好頂滿，貼在一起很醜，留一條細縫分開（Vivian 2026-08-19）。
+    var visualTop = card.top + 1, visualHeight = Math.max(card.height - 2, 10);
+    return '<article class="' + classes.join(' ') + '" data-eid="' + h(card.id) + '" style="--ff-top:' + visualTop + 'px;--ff-height:' + visualHeight + 'px;--ff-left:' + left + '%;--ff-width:' + width + '%;--ff-card-bg:' + h(card.palette.background) + ';--ff-card-border:' + h(card.palette.border) + ';--ff-card-text:' + h(card.palette.text) + ';top:' + visualTop + 'px;height:' + visualHeight + 'px;left:' + left + '%;width:' + width + '%;background:' + h(card.palette.background) + ';border-color:' + h(card.palette.border) + ';color:' + h(card.palette.text) + '">' +
       '<div class="ff-cal-card-main" role="button" tabindex="0" data-action="ff-card-detail" data-eid="' + h(card.id) + '" data-ff-drag="card" aria-label="查看 ' + h(card.title) + '">' +
         '<strong class="ff-cal-card-title"><span class="ff-cal-type-icon" aria-hidden="true">' + h(card.categoryIcon || '📍') + '</span>' + h(card.title) + '</strong>' +
         '<span class="ff-cal-card-time">' + h(card.startLabel + '–' + card.endLabel) + '</span>' +
         (warningText ? '<span class="ff-cal-card-hours">' + h(warningText) + '</span>' : '') + note + todo +
-        '<span class="ff-cal-card-flags">' + (map ? '<span class="ff-cal-meta-icon" title="有 Maps 連結" aria-label="有 Maps 連結">⌖</span>' : '') + '</span>' +
       '</div>' +
-      (map ? '<a class="ff-cal-card-map-link" href="' + h(map) + '" target="_blank" rel="noopener noreferrer" aria-label="在 Google Maps 開啟' + h(card.title) + '">Maps ↗</a>' : '') +
+      // 放卡片右上角、main 外面（不吃 main 的點擊委派，點了才不會同時打開編輯浮層）：
+      // 上面通常只有標題，比下面永遠有備註/待辦的空間寬鬆，不用另外留白也不會疊字（Vivian 2026-08-19）。
+      (map ? '<a class="ff-cal-card-map-link" href="' + h(map) + '" target="_blank" rel="noopener noreferrer" aria-label="在 Google Maps 開啟' + h(card.title) + '">📍</a>' : '') +
       cardControls +
       '<span hidden data-action="ff-edit" data-eid="' + h(card.id) + '"></span>' +
     '</article>';
@@ -986,8 +989,12 @@
         return '<a class="ff-detail-maps" href="' + h(link.url) + '" target="_blank" rel="noopener noreferrer"><span>' + h(link.label || '在 Google Maps 開啟') + '</span><span aria-hidden="true">↗</span></a>';
       }).join('') + '</div>' : '');   // 只有一個點時，上面那顆「開啟 Maps」就夠了，不再多列一行
     var mapSection = '<section class="ff-editor-section"><h4>Maps 連結</h4>' +
-      '<label class="ff-field"><span>Google Maps 連結</span><input type="url" inputmode="url" data-ff-place-maps value="' + h(editor.placeCard && editor.placeCard.mapsUrl || '') + '" placeholder="https://maps.google.com/…"' + (editor.placeCard ? '' : ' disabled') + '></label>' +
+      '<label class="ff-field"><span>Google Maps 連結</span><input type="url" inputmode="url" data-ff-place-maps value="' + h(editor.placeCard ? editor.placeCard.mapsUrl || '' : editor.customMapsUrl) + '" placeholder="https://maps.google.com/…"></label>' +
       '</section>';
+    // 類別只有自訂行程能改：掛地點卡的類別跟著卡片庫走，改地點卡才對（避免兩處各存一份互相打架）。
+    var categorySection = editor.placeId ? '' : '<section class="ff-editor-section"><label class="ff-field"><span>類別</span><select data-ff-category>' +
+      categoriesList().map(function (c) { return '<option value="' + h(c.key) + '"' + (c.key === editor.category ? ' selected' : '') + '>' + h(c.icon) + ' ' + h(c.label) + '</option>'; }).join('') +
+      '</select></label></section>';
     // 待辦是草稿：勾選與新增都只改 state，按儲存才寫進資料（她 2026-08-16 定案）。
     var todos = (editor.todos || []).map(function (todo) { return todoRowHtml(item.id, todo); }).join('');
     var noteSection = '<section class="ff-editor-section"><label class="ff-field"><span>備註</span><textarea data-ff-notes maxlength="500" placeholder="選填">' + h(editor.note) + '</textarea></label></section>';
@@ -1005,7 +1012,7 @@
       editor.error ? '<div class="ff-preview-state error" role="alert">' + h(editor.error) + '</div>' : '';
     var html = '<div class="ff-sheet ff-editor-sheet" role="dialog" aria-modal="true" aria-label="編輯行程">' +
       '<button type="button" class="ff-grab" data-action="ff-grab" aria-label="拉高或收起這張卡"></button>' +
-      '<div class="ff-sheet-scroll">' + hidden + titleField + timeBlock + hoursBlock + mapRow + placePriceRow(editor) + noteSection + todoSection + advanced + deleteRow + notice + preview + '</div>' +
+      '<div class="ff-sheet-scroll">' + hidden + titleField + timeBlock + hoursBlock + mapRow + placePriceRow(editor) + categorySection + noteSection + todoSection + advanced + deleteRow + notice + preview + '</div>' +
       '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || !editor.title.trim() ? ' disabled' : '') + '>儲存</button></div></div>';
     openSheet(html, function () { renderEditor(); }, 'fineflow-editor');
     applyEditorSheetHeight();
@@ -1060,6 +1067,8 @@
     state.editor = null;
     state.selectedId = null;
     if (uiStore) uiStore.dispatch({ type: 'CANCEL' });
+    // 卡片已經不在了，返回堆疊裡的上一層（那張已刪的卡片詳情）也失效了，整個清空直接跳回日曆，不要只退一層。
+    if (typeof navStack !== 'undefined' && navStack.length) navStack.length = 0;
     if (typeof closeSheet === 'function') closeSheet();
     applyPlanChange('已刪除「' + label + '」', guard, function (version) {
       var index = version.plan.findIndex(function (entry) { return entry.id === id; });
@@ -1157,6 +1166,7 @@
       note: note, originalNote: note,
       placeNote: place ? place.note || '' : '', placeId: item.placeId || null, originalPlaceId: item.placeId || null, placeCard: place ? copy(place) : null,
       originalMapsUrl: place ? place.mapsUrl || '' : null,
+      category: item.category || '其他', customMapsUrl: (item.custom && item.custom.mapsUrl) || '',
       todos: copy(item.todos || []), originalTodos: JSON.stringify(item.todos || []),
       date: date, endDate: end <= start ? addDays(date, 1) : date,
       start: start, end: end,
@@ -1286,7 +1296,12 @@
         // 哪天被同步回庫卡就把地點名字蓋掉（「住宿 Himku」被寫成「前往 Himku」就是這樣來的）。
         // 要不一樣的描述，就開一張不掛庫卡的描述卡。
         if (editedItem.placeId) { if (editedItem.custom) delete editedItem.custom.title; }
-        else if (editedItem.custom) editedItem.custom.title = editor.title.trim();
+        else {
+          if (!editedItem.custom) editedItem.custom = { kind: 'life' };
+          editedItem.custom.title = editor.title.trim();
+          editedItem.custom.mapsUrl = editor.customMapsUrl || '';
+          editedItem.category = editor.category || '其他';
+        }
         // 一欄備註：有地點卡就存地點卡，並把舊的單次備註搬空（避免同一段字在兩處各存一份）。
         if (editor.placeId && editor.placeCard) { editor.placeCard.note = editor.note || ''; editedItem.notes = ''; }
         else editedItem.notes = editor.note || '';
@@ -1317,9 +1332,12 @@
         }
       }
       if (typeof syncActive === 'function') syncActive();
+      // 一定要先清掉再 afterChange()：afterChange 裡的 renderAll() 會馬上重畫日曆，
+      // 這時 selectedId 還沒清就會把已經關掉的編輯浮層那張卡畫成「選取」，卡住不會退（Vivian 2026-08-19）。
+      state.editor = null;
+      state.selectedId = null;
       if (typeof afterChange === 'function') afterChange();
       if (typeof closeSheet === 'function') closeSheet();
-      state.editor = null;
       if (uiStore && inverse) uiStore.dispatch({ type: 'APPLY_SUCCEEDED', inverseTransaction: inverse, appliedVersion: next });
       var message = '已' + summaryText(transaction);
       if (typeof toast === 'function') toast(message, { undo: function () {
@@ -1679,6 +1697,11 @@
       identities[identity(placeUrl, place && place.placeId)] = true;
       links.push({ label: place.name || '在 Google Maps 開啟', url: placeUrl, source: 'place' });
     }
+    var customUrl = !place && item && item.custom && safeMapsUrl(item.custom.mapsUrl);
+    if (customUrl) {
+      identities[identity(customUrl)] = true;
+      links.push({ label: '在 Google Maps 開啟', url: customUrl, source: 'custom' });
+    }
     (item && Array.isArray(item.mapLinks) ? item.mapLinks : []).forEach(function (entry) {
       var url = safeMapsUrl(typeof entry === 'string' ? entry : entry && entry.url);
       var key = url && identity(url, typeof entry === 'object' && entry && entry.placeId);
@@ -1921,6 +1944,7 @@
       var singleItem = findOccurrence(state.editor.id);
       var singleTransaction = state.editor.transaction;
       state.editor = null;
+      state.selectedId = null;
       if (typeof closeSheet === 'function') closeSheet();
       applyPointerTransaction(singleItem, singleTransaction);
       return;
@@ -1932,6 +1956,7 @@
         try {
           var rippleTransaction = previewPointerTransaction(compactEditor.pointerDraft, compactItem, 'ripple');
           state.editor = null;
+          state.selectedId = null;
           if (typeof closeSheet === 'function') closeSheet();
           applyPointerTransaction(compactItem, rippleTransaction);
         } catch (compactError) {
@@ -2857,6 +2882,7 @@
       return;
     } else if (event.target.matches('[data-ff-place-maps]')) {
       if (state.editor.placeCard) state.editor.placeCard.mapsUrl = event.target.value;
+      else state.editor.customMapsUrl = event.target.value;
       return;
     } else if (event.target.matches('[data-ff-date]')) {
       var previousDate = state.editor.date;
@@ -2904,6 +2930,7 @@
     }
     else if (event.target.matches('[data-ff-coarse-day]')) { state.editor.coarseDay = event.target.value; renderEditor(); return; }
     else if (event.target.matches('[data-ff-coarse-slot]')) { state.editor.coarseSlot = event.target.value; renderEditor(); return; }
+    else if (event.target.matches('[data-ff-category]')) { state.editor.category = event.target.value; return; }
     else return;
     state.editor.notice = '';
     runPreview();

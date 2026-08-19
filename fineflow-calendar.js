@@ -280,10 +280,12 @@
       place: clone(place),
       missingPlace: !!(occurrence && occurrence.placeId && !place),
       categoryKey: categoryKey,
-      categoryIcon: categoryIcon(trip, categoryKey),
+      categoryIcon: place && typeof place.icon === 'string' && place.icon ? place.icon : categoryIcon(trip, categoryKey),
       categoryColor: color,
       palette: deriveCategoryPalette(color),
-      mapsUrl: place && typeof place.mapsUrl === 'string' ? place.mapsUrl : '',
+      // place.mapsUrl 只是使用者手動貼過的原始連結；沒貼過的地點卡，全站都是靠 gmaps() 用 placeId／座標／店名現算一條可用連結（app-1-core.js），
+      // 這裡漏接這層 fallback 就會變成「有存連結的卡才有 Maps 按鈕」，跟粗流／地圖彈窗看到的不一致（Vivian 2026-08-19 抓到）。
+      mapsUrl: place ? (typeof place.mapsUrl === 'string' && place.mapsUrl ? place.mapsUrl : (typeof gmaps === 'function' ? gmaps(place) : '')) : (occurrence && occurrence.custom && typeof occurrence.custom.mapsUrl === 'string' ? occurrence.custom.mapsUrl : ''),
       note: occurrence && typeof occurrence.notes === 'string' && occurrence.notes ? occurrence.notes : place && typeof place.note === 'string' ? place.note : '',
       todos: todoSummary(occurrence && occurrence.todos)
     };
