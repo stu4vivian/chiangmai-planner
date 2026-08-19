@@ -1267,6 +1267,31 @@
     Object.keys(source).forEach(function (key) { target[key] = copy(source[key]); });
   }
 
+  // 這張卡的文字欄位原本全靠 input 事件回寫 state。真機上只要有一次沒發事件
+  // （iOS 貼上、自動填入、第三方鍵盤都可能），按儲存時程式看到的就是舊值：
+  // 資料等於沒變 → 不上傳 → 狀態顯示「已同步」→ 重新整理後改動不見。
+  // （Vivian 2026-08-20：貼在「前往飯店 Check in」的 Maps 連結就是這樣消失的。）
+  // 所以存檔與「未存離開」前，一律先把畫面上的值讀回來。時間欄不在此列——那幾格由 state 驅動。
+  function syncEditorFromDom() {
+    var editor = state.editor;
+    if (!editor || typeof sh === 'undefined' || !sh) return;
+    var titleEl = sh.querySelector('[data-ff-title]');
+    if (titleEl) { editor.title = titleEl.value; if (editor.placeCard) editor.placeCard.name = titleEl.value; }
+    var noteEl = sh.querySelector('[data-ff-notes]');
+    if (noteEl) editor.note = noteEl.value;
+    var mapsEl = sh.querySelector('[data-ff-place-maps]');
+    if (mapsEl) {
+      if (editor.placeCard) editor.placeCard.mapsUrl = mapsEl.value;
+      else editor.customMapsUrl = mapsEl.value;
+    }
+    var categoryEl = sh.querySelector('[data-ff-category]');
+    if (categoryEl) editor.category = categoryEl.value;
+    Array.prototype.forEach.call(sh.querySelectorAll('[data-ff-todo-edit]'), function (el) {
+      var todo = (editor.todos || []).find(function (entry) { return entry.id === el.dataset.todo; });
+      if (todo) todo.text = el.value;
+    });
+  }
+
   function applyCoarseEditorFields(version, editor, editedItem) {
     if (!version || !editedItem) return;
     var oldPlaceId = editedItem.placeId || null;
@@ -2201,7 +2226,7 @@
       applyEditorTransaction();
       return;
     }
-    if (action === 'ff-apply') { applyEditorTransaction(); return; }
+    if (action === 'ff-apply') { syncEditorFromDom(); applyEditorTransaction(); return; }
     if (action === 'ff-retry') { state.error = ''; renderFineFlow(); }
   });
 
@@ -2955,6 +2980,7 @@
     if (!state.editor || state.editor.confirmDiscard || state.editor.confirmDelete || state.editor.confirmTodoDelete || state.editor.confirmRipple || state.editor.pointerCompact) return;
     var closer = event.target && event.target.closest && event.target.closest('[data-action="close"]');
     if (!closer || !closer.closest('.ff-editor-sheet')) return;
+    syncEditorFromDom();   // 沒發 input 事件的改動也算「未存」，不然關掉就靜靜丟掉
     var changes = editorPendingChanges(state.editor);
     if (!changes.length) return;
     event.preventDefault();
