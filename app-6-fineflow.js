@@ -730,7 +730,7 @@
     var switcher = '<div class="ff-cal-view-switch" aria-label="顯示天數">' + choices.map(function (choice) { return '<button type="button" data-action="ff-calendar-count" data-count="' + choice + '" aria-pressed="' + (choice === model.visibleDayCount) + '">' + choice + (model.mobile && choice === 3 ? ' 日' : '') + '</button>'; }).join('') + '</div>';
     var stepLabel = model.mobile ? '一天' : model.visibleDayCount + '天';
     return '<div class="ff-calendar" data-version="' + h(model.versionId) + '" data-mobile="' + model.mobile + '" data-anchor-index="' + model.anchorIndex + '" style="--ff-cal-columns:' + model.visibleDayCount + ';--ff-cal-track-columns:' + model.trackDayCount + ';--ff-cal-hour:' + model.pixelsPerHour + 'px;--ff-cal-height:' + calendarHeightPx() + 'px;--ff-track-offset:' + model.trackOffset + '%">' +
-      '<div class="ff-cal-toolbar"><button type="button" class="ff-cal-nav" data-action="ff-prev-days" aria-label="往前' + stepLabel + '">‹</button><div class="ff-cal-range"><span>' + model.visibleDayCount + ' 日行程</span><strong>' + h(model.days[0].date + ' ～ ' + model.days[model.days.length - 1].date) + '</strong></div>' + todoButton + switcher + '<button type="button" class="ff-cal-nav" data-action="ff-next-days" aria-label="往後' + stepLabel + '">›</button></div>' +
+      '<div class="ff-cal-toolbar"><button type="button" class="ff-cal-nav" data-action="ff-prev-days" aria-label="往前' + stepLabel + '">‹</button>' + switcher + todoButton + '<button type="button" class="ff-cal-nav" data-action="ff-next-days" aria-label="往後' + stepLabel + '">›</button></div>' +
       unplanned + '<div class="ff-cal-date-row"><span class="ff-cal-date-spacer"></span><div class="ff-cal-date-viewport"><div class="ff-cal-date-track">' + dates + '</div></div></div>' +
       '<div class="ff-cal-scroll">' + renderTimeGutter() + '<div class="ff-cal-days-viewport"><div class="ff-cal-days">' + days + '</div></div>' + dawnStrip + empty + '</div>' +
       '<button type="button" class="ff-cal-fab" data-action="ff-add-source" aria-label="新增行程">＋</button>' +
@@ -2216,8 +2216,6 @@
       if (visible) { day.removeAttribute('aria-hidden'); day.removeAttribute('inert'); }
       else { day.setAttribute('aria-hidden', 'true'); day.setAttribute('inert', ''); }
     });
-    var range = calendar.querySelector('.ff-cal-range strong');
-    if (range && days[index]) range.textContent = days[index].dataset.date + ' ～ ' + days[Math.min(days.length - 1, index + visibleCount - 1)].dataset.date;
     var visibleDays = days.slice(index, index + visibleCount);
     var unscheduledCount = visibleDays.reduce(function (total, day) { return total + (+day.dataset.unscheduledCount || 0); }, 0);
     var todoBadge = calendar.querySelector('.ff-cal-todo-btn b');
