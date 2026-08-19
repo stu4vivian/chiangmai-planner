@@ -1454,24 +1454,41 @@
       if (dayId && fineDayId(item) !== dayId) return;
       (item.todos || []).forEach(function (todo) { entries.push({ item: item, todo: todo }); });
     });
-    // 照行程的日期時間排（Vivian 2026-08-20）：原本只把已完成沉底，其餘是 plan 陣列順序＝看起來像亂的。
-    // 沒排時間的行程沒有可比的時間，排最後；同一筆行程底下的待辦保持原順序（穩定排序）。
+    // 排序（Vivian 2026-08-20）：已完成一律沉到最後；其餘照行程的日期時間，沒排時間的墊底。
+    // seq＝原順序，當同時間的次鍵，同一筆行程底下的待辦才不會互相跳動。
     entries.forEach(function (entry, index) { entry.seq = index; });
+    function startedAt(entry) {
+      var value = Date.parse((entry.item.fine && entry.item.fine.startAt) || '');
+      return isNaN(value) ? Infinity : value;
+    }
     entries.sort(function (a, b) {
-      var at = Date.parse((a.item.fine && a.item.fine.startAt) || '') , bt = Date.parse((b.item.fine && b.item.fine.startAt) || '');
-      if (isNaN(at)) at = Infinity;
-      if (isNaN(bt)) bt = Infinity;
-      return at - bt || a.seq - b.seq;
+      return (a.todo.done ? 1 : 0) - (b.todo.done ? 1 : 0) || startedAt(a) - startedAt(b) || a.seq - b.seq;
     });
-    var todoHead = '<h4 class="ff-todo-subhead">待辦（' + entries.filter(function (entry) { return !entry.todo.done; }).length + ' 項未完成）</h4>';
-    var body = todoHead + (entries.length ? entries.map(function (entry) {
+    var todoRow = function (entry) {
       var meta = dayMeta(fineDayId(entry.item));
       return '<div class="ff-todo-line">' +
         '<button type="button" class="ff-todo-row' + (entry.todo.done ? ' done' : '') + '" data-action="ff-todo-toggle" data-eid="' + h(entry.item.id) + '" data-todo="' + h(entry.todo.id) + '" aria-pressed="' + entry.todo.done + '">' +
         '<span class="ff-check">' + (entry.todo.done ? '✓' : '') + '</span><span><b>' + h(entry.todo.text) + '</b><small>' + h(meta.label + '・' + (timeFromIso(entry.item.fine && entry.item.fine.startAt) || '未排時間') + '・' + occurrenceTitle(entry.item)) + '</small></span></button>' +
         '<button type="button" class="ff-todo-edit-btn" data-action="ff-unscheduled-edit" data-eid="' + h(entry.item.id) + '" aria-label="編輯這筆行程">✎</button>' +
         '</div>';
-    }).join('') : '<div class="ff-sheet-empty">目前沒有待辦</div>');
+    };
+    // 換一天就插一條淡的日期分隔（她 2026-08-20 要的）；已完成那段自成一區。
+    var lastGroup = null;
+    var rows = entries.map(function (entry) {
+      var meta = dayMeta(fineDayId(entry.item));
+      // 沒排時間的一律歸「未排時間」一組——它們排在所有已排的後面，
+      // 若照粗流日期分組就會冒出第二條「8/22」，看起來像分隔線壞掉。
+      var scheduled = !!(entry.item.fine && entry.item.fine.startAt);
+      var group = entry.todo.done ? '\u0000done' : (scheduled ? meta.label + (meta.wd ? '（' + meta.wd + '）' : '') : '未排時間');
+      var separator = '';
+      if (group !== lastGroup) {
+        separator = '<div class="ff-todo-daysep' + (entry.todo.done ? ' is-done' : '') + '">' + h(entry.todo.done ? '已完成' : group) + '</div>';
+        lastGroup = group;
+      }
+      return separator + todoRow(entry);
+    }).join('');
+    var todoHead = '<h4 class="ff-todo-subhead">待辦（' + entries.filter(function (entry) { return !entry.todo.done; }).length + ' 項未完成）</h4>';
+    var body = todoHead + (rows || '<div class="ff-sheet-empty">目前沒有待辦</div>');
     var pending = unscheduledOccurrences();
     var pendingRows = pending.length ? pending.map(function (item) {
       return '<button type="button" class="ff-source-place-row" data-action="ff-unscheduled-edit" data-eid="' + h(item.id) + '"><b>' + h(occurrenceTitle(item)) + '</b><small>設定日期與時間</small></button>';

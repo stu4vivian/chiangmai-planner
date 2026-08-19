@@ -1030,6 +1030,9 @@
   .ff-todo-sheet .ff-source-place-row{display:block;min-height:0;padding:11px 0;}
   .ff-todo-sheet .ff-source-place-row b{display:block;font-size:12.5px;line-height:1.35;}
   .ff-todo-sheet .ff-source-place-row small{display:block;margin-top:3px;font-size:9.5px;color:var(--faint);}
+  /* 換一天插一條淡的分隔（Vivian 2026-08-20） */
+  .ff-todo-daysep{margin:12px 0 0;padding:0 0 5px;border-bottom:.5px solid var(--line);font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.03em;}
+  .ff-todo-daysep:first-of-type{margin-top:2px;}
   .ff-todo-subhead{margin:18px 0 6px;font-size:10.5px;font-weight:700;color:var(--faint);letter-spacing:.04em;}
   /* 編輯卡的待辦列：勾選鈕＋可編輯輸入框（Vivian 2026-08-20：待辦要能改字） */
   .ff-todo-check{padding:0;border:0;background:transparent;cursor:pointer;}
