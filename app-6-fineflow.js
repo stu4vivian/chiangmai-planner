@@ -1454,7 +1454,15 @@
       if (dayId && fineDayId(item) !== dayId) return;
       (item.todos || []).forEach(function (todo) { entries.push({ item: item, todo: todo }); });
     });
-    entries.sort(function (a, b) { return (a.todo.done ? 1 : 0) - (b.todo.done ? 1 : 0); });
+    // 照行程的日期時間排（Vivian 2026-08-20）：原本只把已完成沉底，其餘是 plan 陣列順序＝看起來像亂的。
+    // 沒排時間的行程沒有可比的時間，排最後；同一筆行程底下的待辦保持原順序（穩定排序）。
+    entries.forEach(function (entry, index) { entry.seq = index; });
+    entries.sort(function (a, b) {
+      var at = Date.parse((a.item.fine && a.item.fine.startAt) || '') , bt = Date.parse((b.item.fine && b.item.fine.startAt) || '');
+      if (isNaN(at)) at = Infinity;
+      if (isNaN(bt)) bt = Infinity;
+      return at - bt || a.seq - b.seq;
+    });
     var todoHead = '<h4 class="ff-todo-subhead">待辦（' + entries.filter(function (entry) { return !entry.todo.done; }).length + ' 項未完成）</h4>';
     var body = todoHead + (entries.length ? entries.map(function (entry) {
       var meta = dayMeta(fineDayId(entry.item));
