@@ -1418,9 +1418,6 @@
           if (index >= 0 && mutation.after) next.plan[index] = copy(mutation.after);
         });
       }
-      // 診斷用（Vivian 2026-08-20 連四輪回報 Maps 連結存不進去）：把「這次到底存了什麼」講在 toast 上，
-      // 分辨得出是「欄位讀不到值」還是「值有寫進去但之後被洗掉」。
-      var mapsSaved = null;
       var editedItem = next.plan.find(function (item) { return item.id === editor.id; });
       if (editedItem) {
         // 卡片只有一個標題＝庫卡名。掛著庫卡的行程不留自己的標題，否則那串字會躺在資料裡，
@@ -1431,7 +1428,6 @@
           if (!editedItem.custom) editedItem.custom = { kind: 'life' };
           editedItem.custom.title = editor.title.trim();
           editedItem.custom.mapsUrl = editorMapsValueNow(editor);
-          mapsSaved = editedItem.custom.mapsUrl;
           editedItem.category = editor.category || '其他';
         }
         // 一欄備註：有地點卡就存地點卡，並把舊的單次備註搬空（避免同一段字在兩處各存一份）。
@@ -1461,7 +1457,6 @@
           var normalizedPlace = copy(editor.placeCard);
           normalizedPlace.name = editor.title.trim();
           normalizedPlace.mapsUrl = editorMapsValueNow(editor);
-          mapsSaved = normalizedPlace.mapsUrl;
           replaceVersionInPlace(targetPlace, normalizedPlace);
         }
       }
@@ -1473,7 +1468,7 @@
       if (typeof afterChange === 'function') afterChange();
       if (typeof closeSheet === 'function') closeSheet();
       if (uiStore && inverse) uiStore.dispatch({ type: 'APPLY_SUCCEEDED', inverseTransaction: inverse, appliedVersion: next });
-      var message = '已' + summaryText(transaction) + (mapsSaved === null ? '' : '｜Maps ' + (mapsSaved ? '已存' : '欄位是空的'));
+      var message = '已' + summaryText(transaction);
       if (typeof toast === 'function') toast(message, { undo: function () {
         var current = activeVersion();
         if (!current || current.id !== before.id) { toast('請先切回原版本再復原'); return; }

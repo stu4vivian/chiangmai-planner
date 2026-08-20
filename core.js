@@ -353,7 +353,14 @@
     // occurrence 標題在所有畫面輸出前都會 escape；保留店名中的正常 &，仍剝除可形成標籤／屬性的字元。
     var title = (typeof value.title === 'string' ? value.title.replace(/[<>"']/g, '') : '').trim();
     if (!title) return null;
-    return { title: title, kind: safeStr(value.kind).trim() || 'life' };
+    var out = { title: title, kind: safeStr(value.kind).trim() || 'life' };
+    // 自訂行程的 Maps 連結（openMapsCreate／編輯卡都會寫這一欄）。原本不在白名單裡，
+    // 於是「存的當下畫面有、一經正規化就消失」——Vivian 2026-08-20 連四輪回報存不進去的真正根因。
+    // 只收 http(s)，並擋掉引號／尖括號（同 save-edit 的連結防護，避免畸形 URL 進同步 blob）。
+    // 不能用 safeStr：它會連 & 一起剝掉，而 Maps 連結幾乎都帶 &（?api=1&query=…）。
+    var mapsUrl = (typeof value.mapsUrl === 'string' ? value.mapsUrl : '').trim();
+    if (/^https?:\/\//i.test(mapsUrl) && !/["'<>]/.test(mapsUrl)) out.mapsUrl = mapsUrl;
+    return out;
   }
   function normalizeFine(value) {
     if (!value || typeof value !== 'object' || !isIsoDateTime(value.startAt) || !isIsoDateTime(value.endAt)) return null;
