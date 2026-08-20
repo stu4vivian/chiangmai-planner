@@ -1068,8 +1068,10 @@
     var noteSection = '<section class="ff-editor-section"><label class="ff-field"><span>備註</span><textarea data-ff-notes maxlength="500" placeholder="選填">' + h(editor.note) + '</textarea></label></section>';
     var todoSection = '<section class="ff-editor-section"><h4>待辦事項</h4><div class="ff-detail-todo-list">' + (todos || '<p class="ff-detail-missing">目前沒有待辦</p>') + '</div><div class="ff-todo-add"><input data-ff-detail-todo-text maxlength="120" placeholder="新增待辦"><button type="button" data-action="ff-detail-todo-add" data-eid="' + h(item.id) + '">新增</button></div></section>';
     // 進階＝一年碰不到幾次的東西：Maps 連結、粗流顯示開關與粗流時段。
-    var advanced = '<details class="ff-rules ff-advanced"' + (editor.advancedOpen ? ' open' : '') + '><summary>Maps 連結・粗流顯示</summary><div class="ff-rules-body">' +
-      mapSection + coarseControls + '</div></details>';
+    // Maps 輸入框原本藏在「進階」摺疊區（Vivian 2026-08-20 連三輪回報連結存不進去，
+    // 其中一種可能就是根本沒展開那區、或貼到別的欄位）。搬到第一屏、跟開啟／複製那排放在一起。
+    var advanced = '<details class="ff-rules ff-advanced"' + (editor.advancedOpen ? ' open' : '') + '><summary>粗流顯示</summary><div class="ff-rules-body">' +
+      coarseControls + '</div></details>';
     var deleteRow = '<button type="button" class="ff-delete-row" data-action="ff-delete">刪除這筆行程</button>';
     var notice = editor.notice ? '<div class="ff-preview-state notice" role="status">' + h(editor.notice) + '</div>' : '';
     var hoursNotes = editorHoursWarnings(editor, item);
@@ -1078,10 +1080,11 @@
       hoursNotes.map(function (text) { return '<span>' + h(text) + '</span>'; }).join('') + '</section>';
     var preview = editor.previewing ? '<div class="ff-preview-state" role="status">正在檢查時間…</div>' :
       editor.error ? '<div class="ff-preview-state error" role="alert">' + h(editor.error) + '</div>' : '';
-    var html = '<div class="ff-sheet ff-editor-sheet" role="dialog" aria-modal="true" aria-label="編輯行程">' +
+    var html = '<div class="ff-sheet ff-editor-sheet" data-eid="' + h(editor.id) + '" role="dialog" aria-modal="true" aria-label="編輯行程">' +
       '<button type="button" class="ff-grab" data-action="ff-grab" aria-label="拉高或收起這張卡"></button>' +
-      '<div class="ff-sheet-scroll">' + hidden + titleField + timeBlock + hoursBlock + mapRow + placePriceRow(editor) + categorySection + noteSection + todoSection + advanced + deleteRow + notice + preview + '</div>' +
+      '<div class="ff-sheet-scroll">' + hidden + titleField + timeBlock + hoursBlock + mapRow + mapSection + placePriceRow(editor) + categorySection + noteSection + todoSection + advanced + deleteRow + notice + preview + '</div>' +
       '<div class="ff-sheet-actions"><button type="button" data-action="close">取消</button><button type="button" class="primary" data-action="ff-apply"' + (!transaction || !editor.title.trim() ? ' disabled' : '') + '>儲存</button></div></div>';
+    editor.domReady = true;   // 這張卡已經畫出來了，之後的重繪才可以從畫面收值
     openSheet(html, function () {
       // 從這張卡跳去編輯地點卡再回來時，草稿裡的名稱／備註還是舊的，
       // 使用者在這裡再按一次儲存就會把剛剛改的蓋回去（Vivian 2026-08-20：「編了完全不會存」的真正原因）。
@@ -1289,7 +1292,13 @@
   function syncEditorFromDom() {
     var editor = state.editor;
     if (!editor || typeof sh === 'undefined' || !sh) return;
-    if (!sh.querySelector('.ff-editor-sheet')) return;   // 畫面現在不是編輯卡（確認框等）就別亂讀
+    // 只有「這張卡自己已經畫過一次」之後才收值。少了這道保護，切到另一張卡時
+    // renderEditor 開頭會讀到「上一張卡還沒被換掉的 DOM」，把舊卡的空欄位寫進新卡的草稿，
+    // 使用者一按儲存就把備註／Maps 清空（Vivian 2026-08-20 的備註就是這樣被洗掉的）。
+    if (!editor.domReady) return;
+    var open = sh.querySelector('.ff-editor-sheet');
+    if (!open) return;                                   // 畫面現在不是編輯卡（確認框等）就別亂讀
+    if (open.dataset.eid !== editor.id) return;          // 保險：畫面上還是別張卡就不收
     var titleEl = sh.querySelector('[data-ff-title]');
     if (titleEl) { editor.title = titleEl.value; if (editor.placeCard) editor.placeCard.name = titleEl.value; }
     var noteEl = sh.querySelector('[data-ff-notes]');
