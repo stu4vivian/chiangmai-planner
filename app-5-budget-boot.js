@@ -151,7 +151,7 @@ function syncDiagText(){
 }
 function syncStatusText(s){ return s==='synced'?'已同步':s==='syncing'?'同步中…':s==='offline'?'離線（已存本機）':'—'; }
 function setSyncStatus(s){ lastSync=s; const el=document.getElementById('syncStatus'); if(el) el.textContent=syncStatusText(s); }
-function syncLink(){ const id=localStorage.getItem(TRIPKEY); return id?location.origin+location.pathname+'#t='+id:''; }
+function syncLink(){ const id=localStorage.getItem(TRIPKEY); return id?location.origin+location.pathname+'#t='+id+'&v='+av().id:''; }   // 帶上目前版本：只給 trip id 的話旅伴會落在 versions[0]（＝可能是你早就不用的版本）
 function copySyncLink(){ const l=syncLink(); if(!l){ toast('尚未連上雲端'); return; } navigator.clipboard.writeText(l).then(()=>toast('連結已複製')).catch(()=>toast(l)); }
 function openSettings(){   // 版B Hub 清單（Vivian 2026-06-22）：分區扁平髮絲線列、每列點進專屬編輯頁（拿掉「管理分類設定」中間層）；登記 navStack 父層→子窗關閉回設定
   const tiers=['t1','t2','t3','t4'].map(k=>`<i style="background:${esc(((TRIP.tierColors||{})[k]||{}).fg||'#999')}"></i>`).join('');
@@ -307,7 +307,8 @@ async function initSync(){
       getLocalDirty:function(){ return localStorage.getItem(dirtyKey)==='1'; },
       setLocalDirty:function(value){ if(value) localStorage.setItem(dirtyKey,'1'); else localStorage.removeItem(dirtyKey); }
     });
-    await syncCtl.load();                              // boot 同步：雲端領先才覆蓋、否則保留本機（見 sync.js load）
+    await syncCtl.load();
+    if(HASH_VER && av().id!==HASH_VER){ setActiveLocal(HASH_VER); renderAll(); }   // 雲端載完才有的版本（旅伴第一次開連結）                              // boot 同步：雲端領先才覆蓋、否則保留本機（見 sync.js load）
     syncCtl.startPolling();
   }catch(e){ setSyncStatus('offline'); }
 }

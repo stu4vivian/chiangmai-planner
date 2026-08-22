@@ -48,6 +48,7 @@ const V2_ENV = /(^|\/)v2(\/|$)/.test(location.pathname);   // 部署在 /v2/ 子
 const TRIPKEY=V2_ENV?'cnx-trip-id-v2':'cnx-trip-id';
 let syncCtl=null;    // 同步控制器（連上線後才有）
 const HASH_TRIP_ID=(location.hash.match(/t=([0-9a-f-]{36})/)||[])[1]||'';
+const HASH_VER=(location.hash.match(/[#&]v=([\w-]+)/)||[])[1]||'';   // 同步連結帶的版本 id：旅伴開連結就落在你當下在看的版本（active 本身仍是 per-device，之後他還是能自由切）
 const STORED_TRIP_ID=localStorage.getItem(TRIPKEY)||'';
 const BOOT_TRIP_ID=HASH_TRIP_ID||STORED_TRIP_ID;
 const CACHE_KEY_BASE=V2_ENV?'cnx-proto-v2':'cnx-proto-v10', OLDKEY=V2_ENV?'cnx-proto-v2-none':'cnx-proto-v9';
@@ -71,6 +72,7 @@ function av(){ const id=localStorage.getItem(AV_KEY);
 function setActiveLocal(id){ if(DB.versions.some(v=>v.id===id)){ localStorage.setItem(AV_KEY,id); syncActive(); } }
 function syncActive(){ const v=av(); plan=v.plan; base=v.base; slotMetaArr=v.slotMeta; }
 syncActive();
+if(HASH_VER) setActiveLocal(HASH_VER);   // 本機快取已有這個版本就先切；雲端載完後 initSync 會再試一次（第一次開連結的裝置本機還沒有）
 function regionsList(){ return (TRIP.regions||[]); }
 function regionLabel(k){ return CNXCore.regionLabel(TRIP,k); }
 function cuisineLabel(k){ return CNXCore.cuisineLabel(TRIP,k); }
